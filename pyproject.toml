@@ -1,0 +1,39 @@
+[project]
+name = "teaspoon"
+version = "0.1.0"
+description = "Experimental repository for research regarding metaheuristic optimization"
+readme = "README.md"
+authors = [
+    { name = "oralet86", email = "mert.ficici86@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "pyright>=1.1.411",
+    "ruff>=0.16.4",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: runs the real model (slow); use `uv run pytest -m integration`",
+]
+addopts = "-m 'not integration'"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

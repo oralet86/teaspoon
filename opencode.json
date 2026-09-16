@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "formatter": {
+    "ruff": {
+      "command": ["uv", "run", "ruff", "format", "$FILE"],
+      "extensions": [".py", ".pyi"]
+    }
+  },
+  "permissions": [
+    { "action": "shell", "resource": "*", "effect": "ask" },
+    { "action": "shell", "resource": "uv run ruff check *", "effect": "allow" },
+    { "action": "shell", "resource": "uv run ruff format *", "effect": "allow" },
+    { "action": "shell", "resource": "uv run pyright *", "effect": "allow" },
+    { "action": "shell", "resource": "uv run pytest *", "effect": "allow" },
+    { "action": "shell", "resource": "git status *", "effect": "allow" },
+    { "action": "shell", "resource": "git diff *", "effect": "allow" }
+  ]
+}
