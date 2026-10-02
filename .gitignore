@@ -1,3 +1,11 @@
+# conference/journal paper .pdf files 
+papers 
+# tsplib, cvrplib, amazon last-mile challenge etc.
+data 
+# specific executables for solvers like
+# LKH-3 and CONCORDE that I'm not allowed to redistribute.
+vendor 
+
 # OpenCode plugin setup
 .opencode
 

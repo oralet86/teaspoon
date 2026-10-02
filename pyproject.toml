@@ -8,8 +8,15 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "numpy>=2.5.3",
+    "ortools>=9.15.6755",
+    "pyqtgraph>=0.14.0",
     "pyright>=1.1.411",
+    "pyside6-essentials>=6.11.2",
+    "rl4co>=0.7.0",
     "ruff>=0.16.4",
+    "torch>=2.14.0",
+    "torchmetrics>=1.9.0",
 ]
 
 [tool.ruff]
