@@ -157,7 +157,12 @@ def _require_exact_capable(instance: Instance) -> None:
         SolverError: If the instance does not use ``EUC_2D`` coordinates.
     """
     edge_weight_type = instance.metadata.get("Edge weight type", "")
-    if edge_weight_type != _EUCLIDEAN_EDGE_WEIGHT_TYPE or instance.nodes is None:
+    nodes = instance.nodes
+    if (
+        edge_weight_type != _EUCLIDEAN_EDGE_WEIGHT_TYPE
+        or nodes is None
+        or nodes.coordinates is None
+    ):
         raise SolverError(
             "distance_mode='exact' needs EUC_2D coordinates, but "
             f"{instance.source_path.name} uses "
@@ -385,11 +390,11 @@ def _exact_euclidean_length(
         SolverError: If the instance carries no coordinates.
     """
     nodes = instance.nodes
-    if nodes is None:
+    coordinates = nodes.coordinates if nodes is not None else None
+    if coordinates is None:
         raise SolverError(
             f"exact distances need coordinates for {instance.source_path.name}"
         )
-    coordinates = nodes.coordinates
     total = 0.0
     for route in routes:
         starts = route

@@ -1,6 +1,5 @@
 """Format-agnostic routing instance model, registry, and bundled formats."""
 
-from .embedding import classical_mds
 from .model import Instance, MatrixLayer, NodeSet, Sequence
 from .registry import (
     DatasetEntry,
@@ -25,7 +24,6 @@ __all__ = [
     "Sequence",
     "TsplibError",
     "build_catalog",
-    "classical_mds",
     "format_for",
     "load_entry",
     "load_instance",

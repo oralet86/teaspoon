@@ -19,7 +19,7 @@ class NodeSet:
 
     Attributes:
         coordinates: Array of shape ``(num_nodes, 2)`` holding display
-            coordinates.
+            coordinates, or ``None`` when the file stores no positions.
         labels: Human-readable label for each node, e.g. the TSPLIB node id.
         categories: Optional array of shape ``(num_nodes,)`` with small
             integer indices into ``category_names`` (depot vs. customer).
@@ -28,7 +28,7 @@ class NodeSet:
             e.g. ``{"demand": ...}`` for vehicle routing instances.
     """
 
-    coordinates: np.ndarray
+    coordinates: np.ndarray | None
     labels: tuple[str, ...]
     categories: np.ndarray | None = None
     category_names: tuple[str, ...] = ()
@@ -37,7 +37,9 @@ class NodeSet:
     @property
     def num_nodes(self) -> int:
         """Number of nodes in the set."""
-        return int(self.coordinates.shape[0])
+        if self.coordinates is not None:
+            return int(self.coordinates.shape[0])
+        return len(self.labels)
 
 
 @dataclass(eq=False, frozen=True, slots=True)
@@ -94,12 +96,13 @@ class Instance:
 
     Attributes:
         name: Display name of the instance.
-        kind: Problem family, e.g. ``"TSP"``, ``"ATSP"``, ``"CVRP"``.
+        kind: Problem family, e.g. ``"TSP"`` or ``"CVRP"``.
         source_path: File the instance was loaded from.
         format_key: Registry key of the format that produced the instance.
         dimension: Expected number of nodes, when known.
-        nodes: Node positions and annotations, or ``None`` for matrix-only
-            instances such as coordinate-free ATSP files.
+        nodes: Node labels and annotations, or ``None`` when the format
+            supplies no node information.  Coordinates inside the set are
+            ``None`` for matrix-only instances such as ``brazil58``.
         sequences: Visit sequences, e.g. optimal tours or delivery routes.
         matrices: Numeric matrices such as explicit edge weights.
         metadata: Ordered key/value pairs shown in the viewer's stats panel.

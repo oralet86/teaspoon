@@ -11,10 +11,13 @@ uv run python -m viewer                        # browse ./data
 uv run python -m viewer data data/ALL_tsp/a280.tsp
 ```
 
-- Double-click a file to load it; a matching `.opt.tour` is attached automatically.
-- The **Plan** tab draws nodes and sequences, the **Matrices** tab draws explicit edge-weight matrices (EXPLICIT TSP/CVRP).
-- Matrix-only instances such as `brazil58` get a derived 2D MDS layout so they can still be inspected; the stats panel says where the coordinates came from.
-- `Open tour…` attaches an extra solution and computes its length from the instance's edge weights.
+- Double-click a file to load it; a matching `.opt.tour` (TSP) or `.sol`
+  (CVRP) is attached automatically.
+- The **Plan** tab draws nodes and sequences, the **Matrices** tab draws
+  explicit edge-weight matrices (EXPLICIT TSP/CVRP).  Instances without
+  coordinates, such as `brazil58`, hide the Plan tab and open on Matrices.
+- `Open solution…` attaches an extra TSPLIB tour or CVRPLIB `.sol` and
+  computes its length from the instance's edge weights.
 - `Export PNG…` saves the current figure for papers and reports.
 - Progress, warnings and errors are logged to the terminal.
 

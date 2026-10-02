@@ -51,10 +51,14 @@ _ROUTE_COLORS = ("#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e", "#8c564b
 
 _MAX_HOVER_NODES = 50_000
 
-_INSTANCE_FILTER = (
-    "Routing instances (*.tsp *.tsp.gz *.atsp *.atsp.gz *.vrp *.vrp.gz);;All files (*)"
+_PLAN_TAB_INDEX = 0
+_MATRICES_TAB_INDEX = 1
+
+_INSTANCE_FILTER = "Routing instances (*.tsp *.tsp.gz *.vrp *.vrp.gz);;All files (*)"
+_SOLUTION_FILTER = (
+    "Solution files (*.tour *.tour.gz *.opt.tour *.opt.tour.gz "
+    "*.sol *.sol.gz);;All files (*)"
 )
-_TOUR_FILTER = "Tour files (*.tour *.tour.gz *.opt.tour.gz);;All files (*)"
 
 
 class MainWindow(QMainWindow):
@@ -126,6 +130,16 @@ class MainWindow(QMainWindow):
         self._render_plan()
         self._render_matrices()
         self._render_stats()
+        self._update_plan_tab()
+
+    def _update_plan_tab(self) -> None:
+        """Show the Plan tab only while the instance has coordinates."""
+        nodes = self._instance.nodes if self._instance is not None else None
+        has_coordinates = nodes is not None and nodes.coordinates is not None
+        self._tabs.setTabVisible(_PLAN_TAB_INDEX, has_coordinates)
+        self._tabs.setCurrentIndex(
+            _PLAN_TAB_INDEX if has_coordinates else _MATRICES_TAB_INDEX
+        )
 
     # ------------------------------------------------------------------
     # User interface construction
@@ -135,8 +149,8 @@ class MainWindow(QMainWindow):
         self._open_instance_action = QAction("Open instance…", self)
         self._open_instance_action.triggered.connect(self._choose_instance)
 
-        self._open_tour_action = QAction("Open tour…", self)
-        self._open_tour_action.triggered.connect(self._choose_tour)
+        self._open_solution_action = QAction("Open solution…", self)
+        self._open_solution_action.triggered.connect(self._choose_solution)
 
         self._toggle_nodes_action = QAction("Show nodes", self)
         self._toggle_nodes_action.setCheckable(True)
@@ -156,7 +170,7 @@ class MainWindow(QMainWindow):
 
         toolbar = self.addToolBar("Main")
         toolbar.addAction(self._open_instance_action)
-        toolbar.addAction(self._open_tour_action)
+        toolbar.addAction(self._open_solution_action)
         toolbar.addSeparator()
         toolbar.addAction(self._toggle_nodes_action)
         toolbar.addAction(self._toggle_routes_action)
@@ -238,15 +252,10 @@ class MainWindow(QMainWindow):
         instance = self._instance
         if instance is None:
             return
-        if instance.nodes is None:
-            message = (
-                "No coordinates available for this instance.\n"
-                "See the Matrices tab for its edge weights."
-            )
-            logger.info("no coordinates to draw for %s", instance.name)
-            self._plot.addItem(pg.TextItem(message, color="#d0d0d0", anchor=(0.5, 0.5)))
-            return
         nodes = instance.nodes
+        if nodes is None or nodes.coordinates is None:
+            logger.info("no coordinates to draw for %s", instance.name)
+            return
         coordinates = nodes.coordinates
         if nodes.categories is not None:
             brushes = [
@@ -274,9 +283,10 @@ class MainWindow(QMainWindow):
         self._plot.autoRange()
 
     def _draw_sequences(self, instance: Instance) -> None:
-        if instance.nodes is None:
+        nodes = instance.nodes
+        if nodes is None or nodes.coordinates is None:
             return
-        coordinates = instance.nodes.coordinates
+        coordinates = nodes.coordinates
         for position, sequence in enumerate(instance.sequences):
             indices = sequence.node_indices
             if indices.size == 0:
@@ -318,7 +328,7 @@ class MainWindow(QMainWindow):
         mask = np.isfinite(values)
         if values.ndim == 2 and values.shape[0] == values.shape[1]:
             # A square matrix often stores a sentinel on the diagonal (TSPLIB
-            # uses 9999 for ATSP); leave it out when choosing the color range.
+            # uses 9999 for some files); leave it out when choosing the range.
             mask = mask & ~np.eye(values.shape[0], dtype=bool)
         candidates = values[mask]
         if candidates.size == 0:
@@ -341,15 +351,16 @@ class MainWindow(QMainWindow):
         lines = [f"{key}: {value}" for key, value in instance.metadata.items()]
         if instance.nodes is not None:
             nodes = instance.nodes
-            coordinates = nodes.coordinates
             lines.append("")
             lines.append(f"Nodes: {nodes.num_nodes}")
-            lines.append(
-                f"X range: {coordinates[:, 0].min():g} … {coordinates[:, 0].max():g}"
-            )
-            lines.append(
-                f"Y range: {coordinates[:, 1].min():g} … {coordinates[:, 1].max():g}"
-            )
+            coordinates = nodes.coordinates
+            if coordinates is None:
+                lines.append("Coordinates: none in file (see the Matrices tab)")
+            else:
+                x_values = coordinates[:, 0]
+                y_values = coordinates[:, 1]
+                lines.append(f"X range: {x_values.min():g} … {x_values.max():g}")
+                lines.append(f"Y range: {y_values.min():g} … {y_values.max():g}")
             if nodes.categories is not None:
                 for position, name in enumerate(nodes.category_names):
                     count = int((nodes.categories == position).sum())
@@ -398,23 +409,23 @@ class MainWindow(QMainWindow):
         if filename:
             self.open_instance(Path(filename))
 
-    def _choose_tour(self) -> None:
+    def _choose_solution(self) -> None:
         if self._instance is None:
-            self.statusBar().showMessage("Load an instance before opening a tour")
+            self.statusBar().showMessage("Load an instance before opening a solution")
             return
         filename, _selected_filter = QFileDialog.getOpenFileName(
             self,
-            "Open tour",
+            "Open solution",
             str(self._data_root),
-            _TOUR_FILTER,
+            _SOLUTION_FILTER,
         )
         if not filename:
             return
         try:
             sequences = load_tours(self._instance, Path(filename))
         except (OSError, ValueError) as error:
-            logger.error("failed to load tour %s: %s", filename, error)
-            QMessageBox.critical(self, "Cannot load tour", str(error))
+            logger.error("failed to load solution %s: %s", filename, error)
+            QMessageBox.critical(self, "Cannot load solution", str(error))
             return
         logger.info(
             "loaded %d sequence(s) from %s",
@@ -449,22 +460,21 @@ class MainWindow(QMainWindow):
 
     def _on_mouse_moved(self, position: QPointF) -> None:
         instance = self._instance
-        if instance is None or instance.nodes is None:
+        if instance is None:
+            return
+        nodes = instance.nodes
+        if nodes is None or nodes.coordinates is None:
             return
         plot_item = self._plot.plotItem
         if plot_item is None or plot_item.vb is None:
             return
         point = plot_item.vb.mapSceneToView(position)
         message = f"x={point.x():.6g}  y={point.y():.6g}"
-        coordinates = instance.nodes.coordinates
+        coordinates = nodes.coordinates
         if coordinates.shape[0] <= _MAX_HOVER_NODES:
             offsets = coordinates - np.array([point.x(), point.y()])
             nearest = int(np.argmin((offsets**2).sum(axis=1)))
-            label = (
-                instance.nodes.labels[nearest]
-                if instance.nodes.labels
-                else str(nearest)
-            )
+            label = nodes.labels[nearest] if nodes.labels else str(nearest)
             message += (
                 f"   nearest node: {label} "
                 f"({coordinates[nearest, 0]:g}, {coordinates[nearest, 1]:g})"

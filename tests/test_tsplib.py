@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from instances.tsplib import TsplibError, load_instance, load_tours
+from instances.tsplib import TsplibError, TsplibFormat, load_instance, load_tours
 
 DATA_ROOT = Path(__file__).resolve().parents[1] / "data"
 TSP_ROOT = DATA_ROOT / "ALL_tsp"
@@ -19,6 +19,7 @@ def test_euclidean_instance_and_optimal_tour() -> None:
     assert instance.kind == "TSP"
     assert instance.dimension == 280
     assert instance.nodes is not None
+    assert instance.nodes.coordinates is not None
     assert instance.nodes.coordinates.shape == (280, 2)
     assert instance.length_of is not None
     (sequence,) = instance.sequences
@@ -69,8 +70,8 @@ def test_explicit_lower_diag_row_matrix() -> None:
     instance = load_instance(TSP_ROOT / "gr17.tsp")
     assert instance.kind == "TSP"
     assert instance.nodes is not None
-    assert instance.nodes.coordinates.shape == (17, 2)
-    assert instance.metadata["Coordinates"].startswith("MDS layout")
+    assert instance.nodes.coordinates is None
+    assert "Coordinates" not in instance.metadata
     (layer,) = instance.matrices
     matrix = layer.values
     assert matrix.shape == (17, 17)
@@ -79,32 +80,57 @@ def test_explicit_lower_diag_row_matrix() -> None:
     assert np.allclose(np.diag(matrix), 0)
 
 
-def test_atsp_full_matrix_is_asymmetric(tmp_path: Path) -> None:
-    instance_path = tmp_path / "tiny.atsp"
-    instance_path.write_text(
-        "NAME : tiny\nTYPE : ATSP\nDIMENSION : 3\nEDGE_WEIGHT_TYPE : EXPLICIT\n"
-        "EDGE_WEIGHT_FORMAT : FULL_MATRIX\nEDGE_WEIGHT_SECTION\n"
-        "0 1 4\n2 0 5\n3 6 0\nEOF\n"
+def test_cvrp_solution_routes_are_depot_anchored() -> None:
+    instance = load_instance(
+        DATA_ROOT / "A" / "A-n32-k5.vrp",
+        tour_path=DATA_ROOT / "A" / "A-n32-k5.sol",
     )
-    instance = load_instance(instance_path)
-    assert instance.kind == "ATSP"
-    assert instance.nodes is not None
-    assert instance.nodes.coordinates.shape == (3, 2)
-    (layer,) = instance.matrices
-    matrix = layer.values
-    assert matrix.shape == (3, 3)
-    assert matrix[0, 2] == 4
-    assert matrix[2, 0] == 3
-    assert instance.length_of is not None
-    assert instance.length_of(np.array([0, 1]), False) == pytest.approx(1)
+    assert instance.kind == "CVRP"
+    assert len(instance.sequences) == 5
+    assert all(sequence.closed for sequence in instance.sequences)
+    assert all(sequence.node_indices[0] == 0 for sequence in instance.sequences)
+    assert sum(sequence.num_stops - 1 for sequence in instance.sequences) == 31
+    lengths = [
+        sequence.length
+        for sequence in instance.sequences
+        if sequence.length is not None
+    ]
+    assert len(lengths) == len(instance.sequences)
+    assert sum(lengths) == pytest.approx(784.0)
 
 
-def test_matrix_only_instance_gets_derived_layout() -> None:
+def test_cvrp_solution_maps_customer_numbers_to_node_indices() -> None:
+    instance = load_instance(DATA_ROOT / "A" / "A-n32-k5.vrp")
+    sequences = TsplibFormat().load_tours(instance, DATA_ROOT / "A" / "A-n32-k5.sol")
+    assert sequences[0].node_indices.tolist() == [0, 21, 31, 19, 17, 13, 7, 26]
+
+
+def test_cvrp_solution_rejects_wrong_coverage(tmp_path: Path) -> None:
+    instance_path = tmp_path / "tiny.vrp"
+    instance_path.write_text(
+        "NAME : tiny\nTYPE : CVRP\nDIMENSION : 3\nEDGE_WEIGHT_TYPE : EUC_2D\n"
+        "CAPACITY : 10\nNODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n"
+        "DEMAND_SECTION\n1 0\n2 1\n3 1\nDEPOT_SECTION\n1\n-1\nEOF\n"
+    )
+    solution_path = tmp_path / "tiny.sol"
+    solution_path.write_text("Route #1: 1 1\nCost 2\n")
+    with pytest.raises(TsplibError, match="cover every customer"):
+        load_instance(instance_path, tour_path=solution_path)
+
+
+def test_cvrp_solution_rejects_non_cvrp_instances(tmp_path: Path) -> None:
+    solution_path = tmp_path / "burma14.sol"
+    solution_path.write_text("Route #1: 1 2\nCost 3\n")
+    with pytest.raises(TsplibError, match="needs a CVRP instance"):
+        load_instance(TSP_ROOT / "burma14.tsp", tour_path=solution_path)
+
+
+def test_matrix_only_instance_has_no_coordinates() -> None:
     instance = load_instance(TSP_ROOT / "brazil58.tsp")
     assert instance.kind == "TSP"
     assert instance.nodes is not None
-    assert instance.nodes.coordinates.shape == (58, 2)
-    assert instance.metadata["Coordinates"].startswith("MDS layout")
+    assert instance.nodes.coordinates is None
+    assert "Coordinates" not in instance.metadata
 
 
 def test_cvrp_demands_depot_and_capacity() -> None:
@@ -207,6 +233,7 @@ def test_world_instance_size() -> None:
     instance = load_instance(DATA_ROOT / "world.tsp")
     assert instance.dimension == 1_904_711
     assert instance.nodes is not None
+    assert instance.nodes.coordinates is not None
     assert instance.nodes.coordinates.shape == (1_904_711, 2)
     assert instance.length_of is not None
     assert "Length function" not in instance.metadata

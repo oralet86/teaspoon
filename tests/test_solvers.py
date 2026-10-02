@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from instances import load_instance
 from solvers import (
     SolverError,
     SolverExecutionError,
@@ -214,10 +215,28 @@ def test_lkh_cvrp_routes_and_export(tmp_path: Path) -> None:
     assert all(sequence.closed for sequence in sequences)
     solution_path = result.save_solution(tmp_path / "line.sol")
     assert solution_path.read_text().splitlines() == [
-        "Route #1: 2 3",
-        "Route #2: 4 5",
+        "Route #1: 1 2",
+        "Route #2: 3 4",
         "Cost 12",
     ]
+
+
+def test_saved_cvrp_solution_round_trips(tmp_path: Path) -> None:
+    instance_path = _write_cvrp_instance(
+        tmp_path / "line.vrp", _LINE_COORDINATES, [0, 1, 1, 1, 1], 2
+    )
+    script = _write_script(tmp_path / "fake_lkh", _FAKE_LKH_SOURCE)
+    result = solve_lkh(instance_path, executable=script, salesmen=2, seed=1)
+    solution_path = result.save_solution(tmp_path / "line.sol")
+    reloaded = load_instance(instance_path, tour_path=solution_path)
+    assert [sequence.node_indices.tolist() for sequence in reloaded.sequences] == [
+        route.tolist() for route in result.routes
+    ]
+    lengths = [sequence.length for sequence in reloaded.sequences]
+    assert all(length is not None for length in lengths)
+    assert sum(length for length in lengths if length is not None) == pytest.approx(
+        result.length
+    )
 
 
 def test_lkh_capacity_violation_is_reported(tmp_path: Path) -> None:

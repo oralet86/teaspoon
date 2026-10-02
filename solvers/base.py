@@ -303,11 +303,23 @@ def _write_cvrp_solution(
     routes: tuple[np.ndarray, ...],
     length: float,
 ) -> None:
-    """Write depot-anchored routes in the CVRPLIB ``.sol`` format."""
-    lines = [
-        f"Route #{position}: "
-        + " ".join(str(int(index) + 1) for index in route[1:]).rstrip()
-        for position, route in enumerate(routes, start=1)
-    ]
+    """Write depot-anchored routes in the CVRPLIB ``.sol`` format.
+
+    CVRPLIB numbers customers ``1..n-1`` and omits the depot, so a
+    zero-based node index is shifted down by one when it follows the depot
+    in the file's own numbering.
+    """
+    lines = []
+    for position, route in enumerate(routes, start=1):
+        depot_index = int(route[0])
+        customers = " ".join(
+            str(_customer_number(int(index), depot_index)) for index in route[1:]
+        )
+        lines.append(f"Route #{position}: {customers}".rstrip())
     lines.append(f"Cost {length:g}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _customer_number(node_index: int, depot_index: int) -> int:
+    """Map a zero-based node index to its CVRPLIB customer number."""
+    return node_index + 1 if node_index < depot_index else node_index

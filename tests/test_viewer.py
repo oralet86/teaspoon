@@ -30,6 +30,8 @@ def test_window_loads_instance_with_tour(application: QApplication) -> None:
     assert window.instance is not None
     assert window.instance.dimension == 280
     assert len(window.instance.sequences) == 1
+    assert window._tabs.isTabVisible(0)
+    assert window._tabs.currentIndex() == 0
     window.close()
 
 
@@ -40,5 +42,19 @@ def test_window_loads_matrix_only_instance(application: QApplication) -> None:
     window.load_entry(entry)
     assert window.instance is not None
     assert window.instance.nodes is not None
+    assert window.instance.nodes.coordinates is None
     assert len(window.instance.matrices) == 1
+    assert not window._tabs.isTabVisible(0)
+    assert window._tabs.currentIndex() == 1
+    window.close()
+
+
+def test_window_loads_cvrp_instance_with_solution(application: QApplication) -> None:
+    entries = build_catalog(DATA_ROOT)
+    entry = next(item for item in entries if item.label == "A-n32-k5.vrp")
+    window = MainWindow(DATA_ROOT)
+    window.load_entry(entry)
+    assert window.instance is not None
+    assert len(window.instance.sequences) == 5
+    assert window._tabs.isTabVisible(0)
     window.close()

@@ -3,25 +3,25 @@
 Covers the instance families bundled under ``data/``:
 
 * symmetric TSP with ``EUC_2D``, ``CEIL_2D``, ``ATT``, ``GEO``, ``GEOM`` and
-  ``EXPLICIT`` edge weights in every matrix layout,
-* ATSP with ``FULL_MATRIX`` edge weights,
+  ``EXPLICIT`` edge weights in every matrix layout, including ``FULL_MATRIX``,
 * CVRP with coordinates, demands, depot and capacity.
 
 Files may be plain text or gzip-compressed.  Tour files such as
-``a280.opt.tour`` are loaded into :class:`~instances.model.Sequence`
-objects with their length computed from the instance's edge weights.
+``a280.opt.tour`` and CVRPLIB solutions such as ``A-n32-k5.sol`` are loaded
+into :class:`~instances.model.Sequence` objects with their length computed
+from the instance's edge weights.
 """
 
 from __future__ import annotations
 
 import gzip
 import logging
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
 
-from .embedding import classical_mds
 from .model import Instance, MatrixLayer, NodeSet, Sequence
 from .registry import DatasetEntry, register_format
 
@@ -30,10 +30,10 @@ logger = logging.getLogger(__name__)
 _GEO_RADIUS_KM = 6378.388
 _GEOM_RADIUS_METRES = 6378388.0
 
-_MAX_EMBEDDING_DIMENSION = 2000
+_INSTANCE_SUFFIXES = (".tsp", ".vrp")
+_TOUR_SUFFIXES = (".opt.tour", ".tour", ".sol")
 
-_INSTANCE_SUFFIXES = (".tsp", ".atsp", ".vrp")
-_TOUR_SUFFIXES = (".opt.tour", ".tour")
+_ROUTE_LINE_PATTERN = re.compile(r"^Route\s*#\s*(\d+)\s*:\s*(.*)$", re.IGNORECASE)
 
 _SECTION_KEYWORDS = frozenset(
     {
@@ -449,6 +449,49 @@ def _parse_tour_arrays(rows: list[str], dimension: int, path: Path) -> list[np.n
     return tours
 
 
+def _parse_cvrp_routes(text: str, path: Path) -> list[tuple[int, list[int]]]:
+    """Parse the ``Route #N: ...`` lines of a CVRPLIB solution file.
+
+    Lines that do not start with ``Route`` (such as ``Cost``) are ignored,
+    matching the CVRPLIB convention.
+
+    Returns:
+        Routes as ``(route_number, customer_numbers)`` pairs sorted by
+        route number.
+
+    Raises:
+        TsplibError: If no route line is found, a value is not a positive
+            integer, or a route number appears more than once.
+    """
+    routes: dict[int, list[int]] = {}
+    for line in text.splitlines():
+        match = _ROUTE_LINE_PATTERN.match(line.strip())
+        if match is None:
+            continue
+        number = int(match.group(1))
+        if number in routes:
+            raise TsplibError(path, f"route number {number} appears more than once")
+        customers: list[int] = []
+        for token in match.group(2).split():
+            try:
+                value = int(token)
+            except ValueError as error:
+                raise TsplibError(
+                    path, f"route {number} contains a non-integer value {token!r}"
+                ) from error
+            if value < 1:
+                raise TsplibError(
+                    path, f"route {number} contains an out-of-range customer {value}"
+                )
+            customers.append(value)
+        if not customers:
+            raise TsplibError(path, f"route {number} is empty")
+        routes[number] = customers
+    if not routes:
+        raise TsplibError(path, "no 'Route #N:' lines found")
+    return sorted(routes.items())
+
+
 def _strip_instance_suffixes(name: str) -> str:
     without_gz = name.removesuffix(".gz")
     stem, _separator, _suffix = without_gz.rpartition(".")
@@ -456,7 +499,7 @@ def _strip_instance_suffixes(name: str) -> str:
 
 
 def _find_tour_companion(instance_path: Path) -> Path | None:
-    """Find ``<name>.opt.tour`` next to an instance file, if it exists."""
+    """Find a tour or CVRPLIB solution next to an instance file, if any."""
     stem = _strip_instance_suffixes(instance_path.name)
     for tour_suffix in _TOUR_SUFFIXES:
         for suffix in (".gz", ""):
@@ -471,12 +514,87 @@ def _find_tour_companion(instance_path: Path) -> Path | None:
 # ---------------------------------------------------------------------------
 
 
+def _single_depot_index(instance: Instance, path: Path) -> int:
+    """Return the zero-based index of a CVRP instance's single depot.
+
+    Raises:
+        TsplibError: If the instance carries no depot category or more than
+            one depot node.
+    """
+    nodes = instance.nodes
+    if nodes is None or nodes.categories is None or "depot" not in nodes.category_names:
+        raise TsplibError(path, "cannot locate the depot in the instance")
+    depot_category = nodes.category_names.index("depot")
+    depots = [
+        int(index) for index in np.flatnonzero(nodes.categories == depot_category)
+    ]
+    if len(depots) != 1:
+        raise TsplibError(path, f"expected exactly one depot, found {len(depots)}")
+    return depots[0]
+
+
+def load_solution(instance: Instance, path: Path) -> tuple[Sequence, ...]:
+    """Load a CVRPLIB ``.sol`` file as sequences for a CVRP instance.
+
+    CVRPLIB solutions number customers ``1..n-1`` and omit the depot.  The
+    depot is prepended to every route, so the sequences are closed round
+    trips in the viewer's zero-based node-index convention.
+
+    Args:
+        instance: The CVRP instance the solution was computed for.
+        path: Solution file, plain or gzipped.
+
+    Returns:
+        One closed :class:`~instances.model.Sequence` per route.
+
+    Raises:
+        TsplibError: If the instance is not CVRP, the file has no usable
+            routes, or the routes do not cover every customer exactly once.
+        OSError: If the file cannot be read.
+    """
+    if instance.kind != "CVRP":
+        raise TsplibError(
+            path, f"a CVRPLIB solution needs a CVRP instance, got {instance.kind}"
+        )
+    if instance.dimension is None:
+        raise TsplibError(path, "cannot validate a solution without a dimension")
+    depot = _single_depot_index(instance, path)
+    customer_indices = [index for index in range(instance.dimension) if index != depot]
+    routes = _parse_cvrp_routes(_read_text(path), path)
+
+    sequences: list[Sequence] = []
+    covered: list[int] = []
+    for number, customer_numbers in routes:
+        node_indices = [depot]
+        for customer_number in customer_numbers:
+            if customer_number > len(customer_indices):
+                raise TsplibError(
+                    path,
+                    f"route {number} customer {customer_number} is out of range "
+                    f"1..{len(customer_indices)}",
+                )
+            node_indices.append(customer_indices[customer_number - 1])
+        covered.extend(node_indices[1:])
+        indices = np.array(node_indices, dtype=np.int64)
+        length = None
+        if instance.length_of is not None:
+            length = float(instance.length_of(indices, True))
+        label = path.name if len(routes) == 1 else f"{path.name} route {number}"
+        sequences.append(
+            Sequence(node_indices=indices, label=label, closed=True, length=length)
+        )
+    if sorted(covered) != customer_indices:
+        raise TsplibError(path, "routes do not cover every customer exactly once")
+    return tuple(sequences)
+
+
 def load_instance(path: Path, tour_path: Path | None = None) -> Instance:
     """Load a TSPLIB instance, optionally attaching one tour file.
 
     Args:
         path: TSPLIB instance file, plain or gzipped.
-        tour_path: Optional tour file to attach as a sequence.
+        tour_path: Optional TSPLIB tour or CVRPLIB ``.sol`` file to attach
+            as sequences.
 
     Raises:
         TsplibError: If the file is not valid TSPLIB.
@@ -526,7 +644,7 @@ def load_instance(path: Path, tour_path: Path | None = None) -> Instance:
     if "DEPOT_SECTION" in sections:
         depots = _parse_depots(sections["DEPOT_SECTION"], dimension, path)
 
-    labels: tuple[str, ...] = ()
+    labels: tuple[str, ...]
     display_coordinates: np.ndarray | None = None
     coordinates_source = ""
     if raw_coordinates is not None and node_ids is not None:
@@ -537,25 +655,10 @@ def load_instance(path: Path, tour_path: Path | None = None) -> Instance:
             # TSPLIB stores (latitude, longitude); show map-like axes instead.
             display_coordinates = raw_coordinates[:, ::-1].copy()
             coordinates_source = "longitude, latitude"
-    elif matrix is not None and dimension <= _MAX_EMBEDDING_DIMENSION:
-        # Matrix-only instances, such as brazil58.tsp, get a derived layout so
-        # the viewer can still draw a map-like plan.
-        logger.info(
-            "deriving 2D layout for %s from its %d x %d edge weight matrix",
-            path.name,
-            dimension,
-            dimension,
-        )
-        display_coordinates = classical_mds(matrix)
+    else:
+        # Matrix-only instances such as brazil58.tsp keep their annotations
+        # but have no coordinates to draw.
         labels = tuple(str(index) for index in range(1, dimension + 1))
-        coordinates_source = "MDS layout of edge weights (file has no coordinates)"
-    elif matrix is not None:
-        logger.info(
-            "not deriving a layout for %s: dimension %d exceeds the limit %d",
-            path.name,
-            dimension,
-            _MAX_EMBEDDING_DIMENSION,
-        )
 
     categories: np.ndarray | None = None
     category_names: tuple[str, ...] = ()
@@ -579,15 +682,13 @@ def load_instance(path: Path, tour_path: Path | None = None) -> Instance:
             ),
         )
 
-    nodes: NodeSet | None = None
-    if display_coordinates is not None:
-        nodes = NodeSet(
-            coordinates=display_coordinates,
-            labels=labels,
-            categories=categories,
-            category_names=category_names,
-            attributes=attributes,
-        )
+    nodes = NodeSet(
+        coordinates=display_coordinates,
+        labels=labels,
+        categories=categories,
+        category_names=category_names,
+        attributes=attributes,
+    )
 
     length_of = _make_length_function(edge_weight_type, raw_coordinates, matrix)
     if length_of is None:
@@ -646,7 +747,7 @@ def load_tours(path: Path, dimension: int) -> list[np.ndarray]:
 
 
 class TsplibFormat:
-    """Catalog format plugin for TSPLIB instance and tour files."""
+    """Catalog format plugin for TSPLIB instances, tours and CVRPLIB solutions."""
 
     key = "tsplib"
     display_name = "TSPLIB"
@@ -676,6 +777,8 @@ class TsplibFormat:
         return load_instance(entry.path, tour_path=tour_path)
 
     def load_tours(self, instance: Instance, path: Path) -> tuple[Sequence, ...]:
+        if path.name.removesuffix(".gz").lower().endswith(".sol"):
+            return load_solution(instance, path)
         if instance.dimension is None:
             raise TsplibError(path, "cannot validate tours without a dimension")
         arrays = load_tours(path, instance.dimension)

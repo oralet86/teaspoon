@@ -18,6 +18,16 @@ def test_catalog_finds_bundled_formats() -> None:
     assert a280.group == "ALL_tsp"
     assert a280.companions["tour"].name == "a280.opt.tour"
     assert by_label["A-n32-k5.vrp"].group == "A"
+    assert by_label["A-n32-k5.vrp"].companions["tour"].name == "A-n32-k5.sol"
+
+
+def test_catalog_entry_attaches_cvrp_solution() -> None:
+    entries = build_catalog(DATA_ROOT)
+    entry = next(item for item in entries if item.label == "A-n32-k5.vrp")
+    instance = load_entry(entry)
+    assert len(instance.sequences) == 5
+    assert all(sequence.node_indices[0] == 0 for sequence in instance.sequences)
+    assert sum(sequence.num_stops - 1 for sequence in instance.sequences) == 31
 
 
 def test_catalog_entry_loads_with_tour() -> None:
