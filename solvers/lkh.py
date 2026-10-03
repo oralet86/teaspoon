@@ -26,6 +26,7 @@ from .base import (
     find_executable,
     require_length,
     run_process,
+    validate_capacity,
 )
 
 _DISTANCE_MODES = ("file", "exact")
@@ -311,7 +312,7 @@ def _reconstruct_cvrp_routes(
         raise SolverExecutionError(
             f"lkh covered {customers.size} customers, expected {expected_customers}"
         )
-    _validate_capacity(instance, routes)
+    validate_capacity(instance, routes, solver="lkh")
     return routes
 
 
@@ -338,30 +339,6 @@ def _depot_node_indices(instance: Instance) -> tuple[int, ...]:
     if not depots:
         raise SolverExecutionError(f"{instance.source_path.name} has no depot node")
     return depots
-
-
-def _validate_capacity(
-    instance: Instance,
-    routes: tuple[np.ndarray, ...],
-) -> None:
-    """Check every route load against the instance capacity, when known.
-
-    Raises:
-        SolverExecutionError: If a route carries more than the capacity.
-    """
-    nodes = instance.nodes
-    capacity_text = instance.metadata.get("Capacity")
-    if nodes is None or capacity_text is None or "demand" not in nodes.attributes:
-        return
-    capacity = float(capacity_text)
-    demands = nodes.attributes["demand"]
-    for position, route in enumerate(routes, start=1):
-        load = float(demands[route[1:]].sum())
-        if load > capacity + 1e-6:
-            raise SolverExecutionError(
-                f"lkh route {position} carries {load:g}, above the capacity "
-                f"{capacity:g}"
-            )
 
 
 def _compute_length(

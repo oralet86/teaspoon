@@ -1,10 +1,11 @@
-"""Shared plumbing for the bundled Concorde and LKH-3 solver wrappers.
+"""Shared plumbing for the bundled command-line solver wrappers.
 
 The wrappers run the command-line solvers that live under ``vendor/`` (or
-wherever ``CONCORDE_BIN`` / ``LKH_BIN`` point) and translate their file-based
-output into the format-agnostic model defined in :mod:`instances`.  Solver
-processes always run in a temporary working directory because both binaries
-drop scratch files next to their output, never next to the instance.
+wherever the matching environment variable points) and translate their
+file-based output into the format-agnostic model defined in
+:mod:`instances`.  Solver processes always run in a temporary working
+directory because the binaries drop scratch files next to their output,
+never next to the instance.
 """
 
 from __future__ import annotations
@@ -12,10 +13,12 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import threading
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 import numpy as np
 
@@ -29,10 +32,20 @@ VENDOR_DIRECTORY = REPOSITORY_ROOT / "vendor"
 _EXECUTABLE_ENVIRONMENT_VARIABLES: Mapping[str, str] = {
     "concorde": "CONCORDE_BIN",
     "lkh": "LKH_BIN",
+    "hgs": "HGS_BIN",
+    "filo2": "FILO2_BIN",
 }
 _DEFAULT_EXECUTABLES: Mapping[str, Path] = {
     "concorde": VENDOR_DIRECTORY / "concorde",
     "lkh": VENDOR_DIRECTORY / "LKH",
+    "hgs": VENDOR_DIRECTORY / "hgs",
+    "filo2": VENDOR_DIRECTORY / "filo2",
+}
+SOLVER_SOURCES: Mapping[str, str] = {
+    "concorde": "https://www.math.uwaterloo.ca/tsp/concorde.html",
+    "lkh": "http://akira.ruc.dk/~keld/research/LKH-3/",
+    "hgs": "https://github.com/vidalt/HGS-CVRP",
+    "filo2": "https://github.com/acco93/filo2",
 }
 
 
@@ -49,11 +62,39 @@ class SolverExecutionError(SolverError):
 
 
 @dataclass(eq=False, frozen=True, slots=True)
+class TracePoint:
+    """One best-cost observation during an anytime solver run.
+
+    Attributes:
+        wall_seconds: Seconds between process start and the observation.
+        best_cost: Best solution cost reported at that moment.
+    """
+
+    wall_seconds: float
+    best_cost: float
+
+
+@dataclass(eq=False, frozen=True, slots=True)
+class StreamedLine:
+    """One line of solver output with the wall-clock time it arrived.
+
+    Attributes:
+        wall_seconds: Seconds between process start and line arrival.
+        stream: Either ``"stdout"`` or ``"stderr"``.
+        text: Line content without its trailing newline.
+    """
+
+    wall_seconds: float
+    stream: str
+    text: str
+
+
+@dataclass(eq=False, frozen=True, slots=True)
 class SolverResult:
     """One solver run's solution in the project's node-index convention.
 
     Attributes:
-        solver: Solver name, ``"concorde"`` or ``"lkh"``.
+        solver: Solver name, for example ``"concorde"`` or ``"hgs"``.
         instance_path: Instance file that was solved.
         kind: Problem family of the instance, e.g. ``"TSP"`` or ``"CVRP"``.
         routes: Zero-based node-index arrays.  A TSP result has exactly one
@@ -64,6 +105,8 @@ class SolverResult:
         command: Full command line, useful for logging and bug reports.
         stdout: Captured standard output.
         stderr: Captured standard error.
+        trace: Best-cost observations over time for anytime solvers; empty
+            for solvers that do not report intermediate solutions.
     """
 
     solver: str
@@ -75,6 +118,7 @@ class SolverResult:
     command: tuple[str, ...]
     stdout: str
     stderr: str
+    trace: tuple[TracePoint, ...] = ()
 
     @property
     def node_indices(self) -> np.ndarray:
@@ -224,6 +268,102 @@ def run_process(
     )
 
 
+def run_process_streaming(
+    command: Iterable[str | Path],
+    *,
+    solver: str,
+    cwd: Path,
+    timeout_seconds: float | None,
+) -> tuple[ProcessOutcome, tuple[StreamedLine, ...]]:
+    """Run a solver command, timestamping every output line as it arrives.
+
+    The timestamps form the wall-clock axis of anytime traces, so they do
+    not depend on whatever clock the solver itself reports.
+
+    Returns:
+        The captured process outcome and every line in arrival order.
+
+    Raises:
+        SolverTimeoutError: If the process exceeds ``timeout_seconds``.
+        SolverExecutionError: If the process cannot start or exits nonzero.
+    """
+    arguments = [str(argument) for argument in command]
+    logger.debug("running %s in %s", " ".join(arguments), cwd)
+    started = time.perf_counter()
+    try:
+        process = subprocess.Popen(
+            arguments,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except OSError as error:
+        raise SolverExecutionError(f"could not start {solver}: {error}") from error
+
+    lines: list[StreamedLine] = []
+    lock = threading.Lock()
+
+    def pump(stream_name: str, stream: IO[str]) -> None:
+        for line in stream:
+            with lock:
+                lines.append(
+                    StreamedLine(
+                        wall_seconds=time.perf_counter() - started,
+                        stream=stream_name,
+                        text=line.rstrip("\n"),
+                    )
+                )
+
+    stdout_stream = process.stdout
+    stderr_stream = process.stderr
+    assert stdout_stream is not None
+    assert stderr_stream is not None
+    threads = [
+        threading.Thread(target=pump, args=("stdout", stdout_stream), daemon=True),
+        threading.Thread(target=pump, args=("stderr", stderr_stream), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+
+    try:
+        returncode = process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as error:
+        process.kill()
+        process.wait()
+        raise SolverTimeoutError(
+            f"{solver} did not finish within {timeout_seconds} seconds; "
+            f"command: {' '.join(arguments)}"
+        ) from error
+    finally:
+        for thread in threads:
+            thread.join(timeout=5)
+    runtime_seconds = time.perf_counter() - started
+
+    stdout = "\n".join(line.text for line in lines if line.stream == "stdout")
+    stderr = "\n".join(line.text for line in lines if line.stream == "stderr")
+    if stdout:
+        stdout += "\n"
+    if stderr:
+        stderr += "\n"
+    if returncode != 0:
+        raise SolverExecutionError(
+            f"{solver} exited with code {returncode}\n"
+            f"command: {' '.join(arguments)}\n"
+            f"stdout:\n{_tail(stdout)}\n"
+            f"stderr:\n{_tail(stderr)}"
+        )
+    outcome = ProcessOutcome(
+        command=tuple(arguments),
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        runtime_seconds=runtime_seconds,
+    )
+    return outcome, tuple(lines)
+
+
 def check_permutation(
     values: np.ndarray,
     expected_size: int,
@@ -268,6 +408,32 @@ def require_length(
             "no length function for this edge weight type"
         )
     return float(instance.length_of(node_indices, closed))
+
+
+def validate_capacity(
+    instance: Instance,
+    routes: tuple[np.ndarray, ...],
+    *,
+    solver: str,
+) -> None:
+    """Check every route load against the instance capacity, when known.
+
+    Raises:
+        SolverExecutionError: If a route carries more than the capacity.
+    """
+    nodes = instance.nodes
+    capacity_text = instance.metadata.get("Capacity")
+    if nodes is None or capacity_text is None or "demand" not in nodes.attributes:
+        return
+    capacity = float(capacity_text)
+    demands = nodes.attributes["demand"]
+    for position, route in enumerate(routes, start=1):
+        load = float(demands[route[1:]].sum())
+        if load > capacity + 1e-6:
+            raise SolverExecutionError(
+                f"{solver} route {position} carries {load:g}, above the capacity "
+                f"{capacity:g}"
+            )
 
 
 def _tail(text: str, max_lines: int = 20) -> str:
