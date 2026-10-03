@@ -4,7 +4,9 @@ papers
 data 
 # specific executables for solvers like
 # LKH-3 and CONCORDE that I'm not allowed to redistribute.
-vendor 
+vendor
+# hypothesis .md files
+experiments
 
 # OpenCode plugin setup
 .opencode

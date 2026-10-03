@@ -1667,6 +1667,27 @@ wheels = [
 ]
 
 [[package]]
+name = "pyvrp"
+version = "0.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "tqdm" },
+    { name = "vrplib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8a/59/a7e4304ff932b0c07b55c7d8b65e9488ee4a508b5a720d8e7d979edfb32c/pyvrp-0.14.0.tar.gz", hash = "sha256:58a4a6027c12f3e8673f9b087195b80ab75e9a2ca0ae3a4c808f37a53fca630f", size = 721665, upload-time = "2026-08-20T08:36:34.056Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/98/c0/140d17e6d128bf81405f5b39e64d90d4f19315a554feac396feff01546c4/pyvrp-0.14.0-cp314-cp314-macosx_13_0_arm64.whl", hash = "sha256:2f549b59e5ed987178b8d20ded3a3703c09f7612cf42c860437149f9a6db9d43", size = 816352, upload-time = "2026-08-20T08:36:54.573Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/2c/9b183cbb9765426937dc402fff816c61623a6549e81f2e1858a07774e413/pyvrp-0.14.0-cp314-cp314-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b29f0bd82ec8f862b6eeb954086c16a8c29c426adbc1b5234b7e4953b3fae981", size = 1113712, upload-time = "2026-08-20T08:36:25.871Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/8b/95062e38b4fa57a8d1586332d31dab79f18a96301054cac3f1ffd7ebfe61/pyvrp-0.14.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:2e90daf3ede29802cb21c9da555b4325c75b90935fcef69c9e561f20df84a534", size = 1236035, upload-time = "2026-08-20T08:36:21.778Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/14/bad84e131b6d6a3b0b17146f36be5a3dfd04a61fd56c7e6ccf12b0096ead/pyvrp-0.14.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:c8c4948366f0c87348e5d820abaa92eb2dada07a5591831d2758d31a32e41ddb", size = 1932000, upload-time = "2026-08-20T08:36:23.111Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/b6/e7c12f5d0433bb0623c742175fdd553a4dd4a44bf55b5e4ef6ddfcee44c9/pyvrp-0.14.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:220b87f98fb7e30cb9996d71d48415bd8e4f0fb8238eddc9e806d081b02fcca3", size = 2071873, upload-time = "2026-08-20T08:36:42.653Z" },
+    { url = "https://files.pythonhosted.org/packages/75/5e/5b562f3b7b98db18e2aed133373e697c6c96b5805d35221ac8b94caff512/pyvrp-0.14.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl", hash = "sha256:cdd4ea5fb5e48035e880bf3c7fbdb473c78e6e2b6d49eca93ecec47f10e83275", size = 687406, upload-time = "2026-08-20T08:36:27.11Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/84/6307ec040c1ea570ebb212da3b86f97aa15e3263695c6508cb2c81db5dda/pyvrp-0.14.0-cp314-cp314-win_amd64.whl", hash = "sha256:f2abff8b98d80223af522f52cd5c56484f56b5e74ccd9b43e146124c95c5ec19", size = 1874992, upload-time = "2026-08-20T08:36:28.546Z" },
+]
+
+[[package]]
 name = "pyyaml"
 version = "6.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1886,6 +1907,7 @@ dependencies = [
     { name = "pyqtgraph" },
     { name = "pyright" },
     { name = "pyside6-essentials" },
+    { name = "pyvrp" },
     { name = "rl4co" },
     { name = "ruff" },
     { name = "torch" },
@@ -1904,6 +1926,7 @@ requires-dist = [
     { name = "pyqtgraph", specifier = ">=0.14.0" },
     { name = "pyright", specifier = ">=1.1.411" },
     { name = "pyside6-essentials", specifier = ">=6.11.2" },
+    { name = "pyvrp", specifier = ">=0.14.0" },
     { name = "rl4co", specifier = ">=0.7.0" },
     { name = "ruff", specifier = ">=0.16.4" },
     { name = "torch", specifier = ">=2.14.0" },
@@ -2062,6 +2085,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz", hash = "sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63", size = 458972, upload-time = "2026-09-15T19:29:36.253Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl", hash = "sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3", size = 135717, upload-time = "2026-09-15T19:29:34.577Z" },
+]
+
+[[package]]
+name = "vrplib"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/76/35/57055aaa3c42efb5e314ba81ab0274d5694d365dc7a97f7584d64923ed05/vrplib-2.2.0.tar.gz", hash = "sha256:806177ecb52ae63b126700135ad08c9c27054bf780525bcdcd7cea4b4848886f", size = 10756, upload-time = "2026-04-06T07:47:29.615Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/26/0d/377dd5a682ff62bb043ec08a8f70941d6e43ff71d4727942a34ab939f531/vrplib-2.2.0-py3-none-any.whl", hash = "sha256:5bed28c4ff8cfaf99da7af3081e5627bc4108f0056abc25be0285d0a8b9ad104", size = 15724, upload-time = "2026-04-06T07:47:28.507Z" },
 ]
 
 [[package]]

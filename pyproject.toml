@@ -13,6 +13,7 @@ dependencies = [
     "pyqtgraph>=0.14.0",
     "pyright>=1.1.411",
     "pyside6-essentials>=6.11.2",
+    "pyvrp>=0.14.0",
     "rl4co>=0.7.0",
     "ruff>=0.16.4",
     "torch>=2.14.0",
