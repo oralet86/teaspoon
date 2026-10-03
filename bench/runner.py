@@ -8,7 +8,6 @@ sweep still leaves usable data behind.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -22,14 +21,23 @@ from typing import Any
 
 from solvers import (
     SolverError,
+    SolverResult,
     TracePoint,
     find_executable,
     solve_filo2,
     solve_hgs,
 )
 
+from .metadata import (
+    cpu_metadata,
+    file_sha256,
+    git_metadata,
+    lockfile_digests,
+    package_versions,
+    thread_environment,
+)
 from .metrics import primal_integral, time_to_target
-from .suites import load_bks
+from .suites import bks_provenance, load_bks
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +77,8 @@ class RunRecord:
     arm: str
     status: str
     bks: float | None = None
+    bks_source: str | None = None
+    bks_sha256: str | None = None
     best_cost: float | None = None
     gap: float | None = None
     time_to_target_1pct: float | None = None
@@ -80,6 +90,7 @@ class RunRecord:
     executable_sha256: str | None = None
     trace_file: str | None = None
     log_file: str | None = None
+    solution_file: str | None = None
     command: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -114,6 +125,7 @@ def run_specs(
     destination = Path(output_dir)
     (destination / "traces").mkdir(parents=True, exist_ok=True)
     (destination / "logs").mkdir(parents=True, exist_ok=True)
+    (destination / "solutions").mkdir(parents=True, exist_ok=True)
     _write_config(destination, specs)
 
     records: list[RunRecord] = []
@@ -155,6 +167,7 @@ def _run_one(
             result = solve_hgs(
                 spec.instance_path,
                 executable=binary,
+                seed=spec.seed,
                 time_limit_seconds=float(spec.budget_seconds),
                 timeout_seconds=timeout_seconds,
             )
@@ -162,6 +175,7 @@ def _run_one(
             result = solve_filo2(
                 spec.instance_path,
                 executable=binary,
+                seed=spec.seed,
                 optimization_seconds=spec.budget_seconds,
                 timeout_seconds=timeout_seconds,
             )
@@ -172,13 +186,15 @@ def _run_one(
         return RunRecord(
             status="error",
             executable=str(binary),
-            executable_sha256=_sha256(binary),
+            executable_sha256=file_sha256(binary),
             error=str(error),
             **common,
         )
 
     trace_file = _write_trace(destination, label, result.trace)
     log_file = _write_log(destination, label, result.stdout, result.stderr)
+    solution_file = _write_solution(destination, label, result)
+    provenance = bks_provenance(spec.instance_path)
     bks = load_bks(spec.instance_path)
     gap = (result.length - bks) / bks if bks is not None else None
     targets: dict[str, float | None] = {name: None for name in _TARGET_GAPS}
@@ -199,6 +215,8 @@ def _run_one(
     return RunRecord(
         status="ok",
         bks=bks,
+        bks_source=None if provenance is None else provenance.source,
+        bks_sha256=None if provenance is None else provenance.sha256,
         best_cost=result.length,
         gap=gap,
         time_to_target_1pct=targets["time_to_target_1pct"],
@@ -207,12 +225,21 @@ def _run_one(
         runtime_seconds=result.runtime_seconds,
         trace_points=len(result.trace),
         executable=str(binary),
-        executable_sha256=_sha256(binary),
+        executable_sha256=file_sha256(binary),
         trace_file=trace_file,
         log_file=log_file,
+        solution_file=solution_file,
         command=list(result.command),
         **common,
     )
+
+
+def _write_solution(destination: Path, label: str, result: SolverResult) -> str:
+    """Write the final routes in the instance's native solution format."""
+    suffix = ".sol" if result.kind == "CVRP" else ".tour"
+    relative = f"solutions/{label}{suffix}"
+    result.save_solution(destination / relative)
+    return relative
 
 
 def _write_trace(
@@ -240,15 +267,6 @@ def _write_log(destination: Path, label: str, stdout: str, stderr: str) -> str:
     return relative
 
 
-def _sha256(path: Path) -> str:
-    """Return the SHA-256 digest of a solver binary."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _write_config(destination: Path, specs: Sequence[RunSpec]) -> None:
     """Write the run configuration and host metadata as ``config.json``."""
     configuration = {
@@ -256,6 +274,11 @@ def _write_config(destination: Path, specs: Sequence[RunSpec]) -> None:
         "platform": platform.platform(),
         "python": sys.version.split()[0],
         "cpu_count": os.cpu_count(),
+        "cpu": cpu_metadata(),
+        "threads": thread_environment(),
+        "git": git_metadata(),
+        "lockfiles": lockfile_digests(),
+        "packages": package_versions(),
         "specs": [
             {
                 "instance": str(spec.instance_path),

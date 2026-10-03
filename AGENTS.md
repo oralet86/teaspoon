@@ -6,3 +6,5 @@
 - Test: `uv run pytest`
 
 After editing Python, run the formatter, linter, and typechecker and fix what they report.
+
+Ignore the contents of the experiments folder unless explicitly mentioned.

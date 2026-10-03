@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
 from bench import RunSpec, load_bks, run_specs
+from bench.metadata import file_sha256
 from bench.metrics import best_cost_at, gap_at, primal_integral, time_to_target
 from bench.report import load_records, summarize, write_summary_csv
+from instances import load_path, load_tours
 from solvers import TracePoint
 
 _TRACE = (
@@ -53,6 +57,28 @@ for step in (1, 2, 3):
           f"Div 0.5 0.5 | Feas 1.0 1.0 | Pen 0 0")
 routes = [f"Route #{index}: {index}" for index in range(1, dimension)]
 solution_path.write_text("\n".join(routes + ["Cost 0"]) + "\n")
+"""
+
+_FAKE_FILO2_SOURCE = r"""
+import sys
+from pathlib import Path
+
+instance_path = Path(sys.argv[1])
+arguments = sys.argv[2:]
+seed = arguments[arguments.index("--seed") + 1]
+outpath = Path(arguments[arguments.index("--outpath") + 1])
+
+dimension = 0
+for line in instance_path.read_text().splitlines():
+    if line.strip().upper().startswith("DIMENSION"):
+        dimension = int(line.split(":")[1])
+
+outpath.mkdir(parents=True, exist_ok=True)
+print(" 40.00        11103        99       26      5523.00")
+routes = [f"Route #{index}: {index}" for index in range(1, dimension)]
+(outpath / f"{instance_path.name}_seed-{seed}.vrp.sol").write_text(
+    "\n".join(routes + ["Cost 0"]) + "\n"
+)
 """
 
 
@@ -137,7 +163,7 @@ def test_run_specs_records_trace_and_metrics(tmp_path: Path) -> None:
     spec = RunSpec(
         instance_path=instance_path,
         solver="hgs",
-        seed=0,
+        seed=7,
         budget_seconds=2,
     )
     run_dir = tmp_path / "run"
@@ -156,6 +182,89 @@ def test_run_specs_records_trace_and_metrics(tmp_path: Path) -> None:
     assert record.log_file is not None
     assert (run_dir / record.log_file).is_file()
     assert record.command[0] == str(script)
+    assert "-seed" in record.command
+    assert record.command[record.command.index("-seed") + 1] == "7"
+    assert record.bks_sha256 == file_sha256(tmp_path / "line.sol")
+
+    assert record.solution_file is not None
+    solution_path = run_dir / record.solution_file
+    assert solution_path.is_file()
+    sequences = load_tours(load_path(instance_path), solution_path)
+    assert len(sequences) == 4
+    assert sum(sequence.num_stops - 1 for sequence in sequences) == 4
+
+
+def test_run_specs_forwards_seed_to_filo2(tmp_path: Path) -> None:
+    instance_path = _write_instance_with_bks(tmp_path)
+    script = _write_script(tmp_path / "fake_filo2", _FAKE_FILO2_SOURCE)
+    spec = RunSpec(
+        instance_path=instance_path,
+        solver="filo2",
+        seed=3,
+        budget_seconds=2,
+    )
+    records = run_specs([spec], tmp_path / "run", executables={"filo2": script})
+    record = records[0]
+    assert record.status == "ok"
+    assert "--seed" in record.command
+    assert record.command[record.command.index("--seed") + 1] == "3"
+    assert record.solution_file is not None
+    assert (tmp_path / "run" / record.solution_file).is_file()
+
+
+def test_run_specs_records_bks_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instance_path = _write_instance_with_bks(tmp_path)
+    script = _write_script(tmp_path / "fake_hgs", _FAKE_HGS_SOURCE)
+    companion = tmp_path / "line.sol"
+    manifest = tmp_path / "bks_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "line.sol": {
+                        "instance": "line",
+                        "source": "https://example.test/download/bks/1",
+                        "fetched": "2026-01-01",
+                        "sha256": file_sha256(companion),
+                        "bks": 20.0,
+                    }
+                },
+            }
+        )
+    )
+    monkeypatch.setattr("bench.suites.BKS_MANIFEST_PATH", manifest)
+    spec = RunSpec(
+        instance_path=instance_path,
+        solver="hgs",
+        seed=0,
+        budget_seconds=2,
+    )
+    records = run_specs([spec], tmp_path / "run", executables={"hgs": script})
+    record = records[0]
+    assert record.bks_source == "https://example.test/download/bks/1"
+    assert record.bks_sha256 == file_sha256(companion)
+
+
+def test_run_config_records_environment_metadata(tmp_path: Path) -> None:
+    instance_path = _write_instance_with_bks(tmp_path)
+    script = _write_script(tmp_path / "fake_hgs", _FAKE_HGS_SOURCE)
+    spec = RunSpec(
+        instance_path=instance_path,
+        solver="hgs",
+        seed=0,
+        budget_seconds=2,
+    )
+    run_dir = tmp_path / "run"
+    run_specs([spec], run_dir, executables={"hgs": script})
+    configuration = json.loads((run_dir / "config.json").read_text())
+    assert configuration["packages"]["numpy"] == importlib.metadata.version("numpy")
+    assert configuration["lockfiles"]["uv.lock"] is not None
+    assert set(configuration["git"]) == {"commit", "branch", "dirty"}
+    assert "model" in configuration["cpu"]
+    assert "OMP_NUM_THREADS" in configuration["threads"]
 
 
 def test_report_round_trip(tmp_path: Path) -> None:

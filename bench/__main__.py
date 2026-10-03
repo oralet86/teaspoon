@@ -3,8 +3,8 @@
 Examples::
 
     uv run python -m bench run --suite smoke --budget 30 \\
-        --seeds 0 --out experiments/runs/smoke
-    uv run python -m bench report experiments/runs/smoke
+        --seeds 0 --out runs/smoke
+    uv run python -m bench report runs/smoke
 """
 
 from __future__ import annotations
@@ -14,12 +14,14 @@ import logging
 import sys
 from pathlib import Path
 
+from .fetch_bks import DEFAULT_INDEX_URL, fetch_bks
 from .report import load_records, summarize, write_summary_csv
 from .runner import RunSpec, run_specs
-from .suites import suite_instances
+from .suites import DATA_ROOT, suite_instances
 
 _SUITE_NAMES = ("smoke", "x", "xl", "ags")
 _SOLVER_NAMES = ("hgs", "filo2")
+_BKS_SUITE_NAMES = ("x", "xl", "ags")
 
 
 def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
@@ -56,6 +58,34 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     report = commands.add_parser("report", help="summarize a run directory")
     report.add_argument("run_dir", type=Path)
     report.add_argument("--csv", action="store_true", help="also write summary.csv")
+
+    fetch = commands.add_parser(
+        "fetch-bks",
+        help="download and verify the best-known solutions of a suite",
+    )
+    fetch.add_argument(
+        "--suites",
+        nargs="+",
+        choices=_BKS_SUITE_NAMES,
+        default=list(_BKS_SUITE_NAMES),
+        help="suites to adopt, verify or refresh (default: all)",
+    )
+    fetch.add_argument(
+        "--refresh",
+        action="store_true",
+        help="re-download solution files that already exist",
+    )
+    fetch.add_argument(
+        "--data-root",
+        type=Path,
+        default=DATA_ROOT,
+        help="root that holds the X/, XL/ and AGS/ folders",
+    )
+    fetch.add_argument(
+        "--index-url",
+        default=DEFAULT_INDEX_URL,
+        help="CVRPLIB instance index, or a local file:// copy",
+    )
     return parser.parse_args(argv)
 
 
@@ -64,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parse_arguments(argv)
     if arguments.command == "report":
         return _report(arguments.run_dir, write_csv=arguments.csv)
+    if arguments.command == "fetch-bks":
+        return _fetch_bks(arguments)
     return _run(arguments)
 
 
@@ -113,6 +145,21 @@ def _report(run_dir: Path, *, write_csv: bool) -> int:
     if write_csv:
         path = write_summary_csv(run_dir, records)
         print(f"summary written to {path}")
+    return 0
+
+
+def _fetch_bks(arguments: argparse.Namespace) -> int:
+    try:
+        entries = fetch_bks(
+            arguments.suites,
+            data_root=arguments.data_root,
+            index_url=arguments.index_url,
+            refresh=arguments.refresh,
+        )
+    except (OSError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(f"recorded {len(entries)} best-known solutions")
     return 0
 
 
