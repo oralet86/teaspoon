@@ -51,10 +51,18 @@ topic per file:
 | [`claim-1-plan.md`](ideas/claim-1-plan.md) | Setup and experiments E0 to E5 for Claim 1, verdict, to do |
 | [`claim-2-reward-notes.md`](ideas/claim-2-reward-notes.md) | Notes on the reward for a Claim 2 selector |
 | [`chained-selection.md`](ideas/chained-selection.md) | Idea: LK-style chaining of operators with a time-based advantage |
+| [`local-context-selection.md`](ideas/local-context-selection.md) | Idea: operator choice by local features of the anchor node (possible Claim 1.3) |
+| [`novelty.md`](ideas/novelty.md) | What is already published and what may still be new; recommended framing |
+| [`benchmark-protocol.md`](ideas/benchmark-protocol.md) | Draft settings for Claim 1: operators, slices, instances, budgets, metrics, statistics, logging |
 | [`results-so-far.md`](ideas/results-so-far.md) | The single GA run on kroA100 |
 | [`prior-work.md`](ideas/prior-work.md) | Adaptive operator selection and time-aware selection in the literature |
 | [`lkh3.md`](ideas/lkh3.md) | LKH-3 background, the paused setting pilot and its result, to do |
 | [`original-proposal.md`](ideas/original-proposal.md) | The hand-written research questions and protocol |
+
+Notes on the papers read (one per source, with what each means for the
+claims) are in [`papers/notes/`](papers/notes/README.md); the reading list is
+[`papers/reading-list.md`](papers/reading-list.md). The whole `papers/`
+folder is currently gitignored, so these notes exist only locally.
 
 ## Using the repository
 

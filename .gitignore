@@ -1,7 +1,8 @@
 # conference/journal paper .pdf files 
-papers 
+papers
+ideas
 # tsplib, cvrplib, amazon last-mile challenge etc.
-data 
+data
 # specific executables for solvers like
 # LKH-3 and CONCORDE that I'm not allowed to redistribute.
 vendor
