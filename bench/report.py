@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .metrics import mean_or_nan
+
 _SUMMARY_FIELDS = (
     "instance",
     "solver",
@@ -66,8 +68,8 @@ def summarize(records: Sequence[Mapping[str, Any]]) -> str:
         reached = f"{len(times)}/{len(successes)}" if successes else "-"
         lines.append(
             f"{solver:<8} {len(group):>5} {len(successes):>4} "
-            f"{_mean(gaps) * 100:>11.3f} {_mean(times):>14.2f} "
-            f"{reached:>11} {_mean(integrals):>9.4f}"
+            f"{mean_or_nan(gaps) * 100:>11.3f} {mean_or_nan(times):>14.2f} "
+            f"{reached:>11} {mean_or_nan(integrals):>9.4f}"
         )
     return "\n".join(lines)
 
@@ -83,10 +85,3 @@ def write_summary_csv(
         for record in records:
             writer.writerow({field: record.get(field) for field in _SUMMARY_FIELDS})
     return path
-
-
-def _mean(values: Sequence[float]) -> float:
-    """Return the arithmetic mean, or ``nan`` for an empty sequence."""
-    if not values:
-        return float("nan")
-    return sum(values) / len(values)

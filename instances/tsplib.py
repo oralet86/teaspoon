@@ -731,6 +731,47 @@ def load_instance(path: Path, tour_path: Path | None = None) -> Instance:
     return instance
 
 
+def load_distance_matrix(path: Path) -> np.ndarray:
+    """Return the full ``(n, n)`` distance matrix of a TSPLIB instance.
+
+    Distances follow the file's edge weight type, so they agree with the
+    instance's own length function.  The matrix takes ``8 * n * n`` bytes,
+    which suits the instance sizes a matrix-based heuristic can handle.
+
+    Raises:
+        TsplibError: If the file is not valid TSPLIB or its edge weight type
+            has no distance function.
+        OSError: If the file cannot be read.
+    """
+    header, sections = _split_header_and_sections(_read_text(path), path)
+    dimension = _require_dimension(header, path)
+    edge_weight_type = header.get("EDGE_WEIGHT_TYPE", "EXPLICIT").upper()
+    if "EDGE_WEIGHT_SECTION" in sections:
+        edge_weight_format = header.get("EDGE_WEIGHT_FORMAT", "").upper()
+        if not edge_weight_format:
+            raise TsplibError(
+                path, "EDGE_WEIGHT_SECTION present without EDGE_WEIGHT_FORMAT"
+            )
+        values = _parse_numbers(
+            sections["EDGE_WEIGHT_SECTION"], path, "EDGE_WEIGHT_SECTION"
+        )
+        return _unpack_edge_weights(values, dimension, edge_weight_format, path)
+    distance = _PAIRWISE_DISTANCES.get(edge_weight_type)
+    if distance is None or "NODE_COORD_SECTION" not in sections:
+        raise TsplibError(
+            path, f"no distance function for EDGE_WEIGHT_TYPE {edge_weight_type!r}"
+        )
+    _node_ids, coordinates = _parse_coordinates(
+        sections["NODE_COORD_SECTION"], dimension, path, "NODE_COORD_SECTION"
+    )
+    return np.stack(
+        [
+            distance(np.broadcast_to(row, coordinates.shape), coordinates)
+            for row in coordinates
+        ]
+    )
+
+
 def load_tours(path: Path, dimension: int) -> list[np.ndarray]:
     """Load all tours from a TSPLIB tour file as zero-based index arrays.
 

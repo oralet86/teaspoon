@@ -212,6 +212,32 @@ def test_run_specs_forwards_seed_to_filo2(tmp_path: Path) -> None:
     assert (tmp_path / "run" / record.solution_file).is_file()
 
 
+def test_run_specs_solves_with_pyvrp(tmp_path: Path) -> None:
+    instance_path = _write_instance_with_bks(tmp_path)
+    spec = RunSpec(
+        instance_path=instance_path,
+        solver="pyvrp",
+        seed=0,
+        budget_seconds=1,
+    )
+    run_dir = tmp_path / "run"
+    records = run_specs([spec], run_dir)
+    record = records[0]
+    assert record.status == "ok"
+    assert record.best_cost is not None
+    assert record.best_cost <= 20.0
+    assert record.executable is not None
+    assert record.executable.startswith("pyvrp==")
+    assert record.executable_sha256 is not None
+    assert record.trace_points > 0
+    assert record.trace_file is not None
+    assert (run_dir / record.trace_file).is_file()
+    assert record.solution_file is not None
+    assert (run_dir / record.solution_file).is_file()
+    assert "--seed" in record.command
+    assert record.command[record.command.index("--seed") + 1] == "0"
+
+
 def test_run_specs_records_bks_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -1902,6 +1902,7 @@ name = "teaspoon"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "ortools" },
     { name = "pyqtgraph" },
@@ -1921,6 +1922,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "numpy", specifier = ">=2.5.3" },
     { name = "ortools", specifier = ">=9.15.6755" },
     { name = "pyqtgraph", specifier = ">=0.14.0" },

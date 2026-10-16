@@ -23,12 +23,12 @@ from instances import Instance, TsplibError, load_path
 from instances.tsplib import load_solution
 
 from .base import (
-    SolverError,
     SolverExecutionError,
     SolverResult,
     StreamedLine,
     TracePoint,
     find_executable,
+    require_cvrp,
     require_length,
     run_process_streaming,
     validate_capacity,
@@ -85,7 +85,7 @@ def solve_hgs(
     """
     path = Path(instance_path)
     instance = load_path(path)
-    _require_cvrp(instance, "hgs")
+    require_cvrp(instance, "hgs")
     binary = find_executable("hgs", executable)
 
     with tempfile.TemporaryDirectory(prefix="teaspoon-hgs-") as directory:
@@ -159,21 +159,6 @@ def parse_hgs_trace(lines: Iterable[StreamedLine]) -> tuple[TracePoint, ...]:
             continue
         points.append(TracePoint(wall_seconds=line.wall_seconds, best_cost=best_cost))
     return tuple(points)
-
-
-def _require_cvrp(instance: Instance, solver: str) -> None:
-    """Check that the instance is a CVRP with a known dimension.
-
-    Raises:
-        SolverError: If the instance is not a CVRP or lacks a dimension.
-    """
-    if instance.kind != "CVRP":
-        raise SolverError(
-            f"{solver} solves CVRP instances only, but "
-            f"{instance.source_path.name} is {instance.kind}"
-        )
-    if instance.dimension is None:
-        raise SolverError(f"{instance.source_path.name} has no DIMENSION field")
 
 
 def _read_routes(instance: Instance, solution_path: Path) -> tuple[np.ndarray, ...]:

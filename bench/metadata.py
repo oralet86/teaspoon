@@ -14,6 +14,8 @@ import os
 import platform
 import re
 import subprocess
+import sys
+import time
 import tomllib
 from importlib import metadata as importlib_metadata
 from pathlib import Path
@@ -131,6 +133,24 @@ def cpu_metadata() -> dict[str, str | int | None]:
         "architecture": platform.machine(),
         "logical_count": os.cpu_count(),
         "affinity_count": affinity_count,
+    }
+
+
+def host_metadata() -> dict[str, object]:
+    """Return the host, repository and environment provenance of a session.
+
+    This is the shared head of every run directory's ``config.json``.
+    """
+    return {
+        "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "platform": platform.platform(),
+        "python": sys.version.split()[0],
+        "cpu_count": os.cpu_count(),
+        "cpu": cpu_metadata(),
+        "threads": thread_environment(),
+        "git": git_metadata(),
+        "lockfiles": lockfile_digests(),
+        "packages": package_versions(),
     }
 
 

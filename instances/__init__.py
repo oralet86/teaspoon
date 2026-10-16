@@ -12,7 +12,12 @@ from .registry import (
     register_format,
     registered_formats,
 )
-from .tsplib import TSPLIB_FORMAT, TsplibError, load_instance
+from .tsplib import (
+    TSPLIB_FORMAT,
+    TsplibError,
+    load_distance_matrix,
+    load_instance,
+)
 
 __all__ = [
     "TSPLIB_FORMAT",
@@ -25,6 +30,7 @@ __all__ = [
     "TsplibError",
     "build_catalog",
     "format_for",
+    "load_distance_matrix",
     "load_entry",
     "load_instance",
     "load_path",

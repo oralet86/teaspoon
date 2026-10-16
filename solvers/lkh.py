@@ -1,9 +1,15 @@
-"""LKH-3 wrapper for symmetric TSP and capacitated VRP instances.
+"""LKH-3 wrappers.
 
 LKH consumes a parameter file that points at the problem and at a tour
-output.  For TSP that output is a standard TSPLIB tour; for CVRP it is a
+output.  :func:`solve_lkh` handles symmetric TSP and CVRP and validates the
+result in Python: a TSP output is a standard TSPLIB tour; a CVRP output is a
 single Hamiltonian cycle over an expanded node set that repeats the depot
 once per vehicle, so the wrapper splits it back into depot-anchored routes.
+
+:func:`run_lkh_reported` runs any problem type LKH-3 supports and takes the
+``(penalty, cost)`` LKH prints at face value.  It exists to compare LKH
+settings against each other, where every run is scored by the same LKH
+evaluator; it is not a substitute for an independent feasibility check.
 """
 
 from __future__ import annotations
@@ -11,7 +17,9 @@ from __future__ import annotations
 import gzip
 import re
 import tempfile
-from collections.abc import Mapping
+import threading
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -22,10 +30,12 @@ from .base import (
     SolverError,
     SolverExecutionError,
     SolverResult,
+    StreamedLine,
     check_permutation,
     find_executable,
     require_length,
     run_process,
+    run_process_streaming,
     validate_capacity,
 )
 
@@ -35,6 +45,92 @@ _EDGE_WEIGHT_TYPE_PATTERN = re.compile(
     r"^(\s*EDGE_WEIGHT_TYPE\s*:\s*)(\S+)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# "* 2: Cost = 0_784, Time = 0.03 sec." for penalised problem types and
+# "* 14: Cost = 50778, Gap = 0.0000%, Time = 0.08 sec. =" otherwise.
+_TRIAL_PATTERN = re.compile(
+    r"^\*\s+(?P<trial>\d+):\s+Cost\s*=\s*(?:(?P<penalty>-?\d+)_)?(?P<cost>-?\d+),"
+    r".*?Time\s*=\s*(?P<seconds>[\d.]+)\s*sec"
+)
+_TRIAL_COUNT_PATTERN = re.compile(r"^Trials\.min\s*=\s*(\d+)")
+_PARAMETER_SPLIT = re.compile(r"[\s:=]+")
+# Keys the reported runner sets itself, so a base parameter file cannot
+# change the protocol of a comparison.
+_MANAGED_PARAMETERS = frozenset(
+    {"RUNS", "SEED", "TIME_LIMIT", "TOTAL_TIME_LIMIT", "MAX_TRIALS", "TRACE_LEVEL"}
+)
+# Large enough that TIME_LIMIT is always the binding stopping rule.
+_UNBOUNDED_TRIALS = 1_000_000_000
+
+
+@dataclass(eq=False, frozen=True, slots=True)
+class LkhTracePoint:
+    """One improving trial reported by LKH.
+
+    Attributes:
+        wall_seconds: Seconds between process start and the line's arrival,
+            which includes LKH's preprocessing.
+        solver_seconds: Seconds LKH itself reports, measured from the start
+            of the search.
+        trial: Trial number of the improvement.
+        penalty: Constraint violation; ``0`` for a feasible solution and for
+            problem types without a penalty.
+        cost: Objective value.
+    """
+
+    wall_seconds: float
+    solver_seconds: float
+    trial: int
+    penalty: int
+    cost: int
+
+
+@dataclass(eq=False, frozen=True, slots=True)
+class LkhReport:
+    """The outcome of one LKH run as LKH reported it.
+
+    Attributes:
+        problem_path: Problem file that was solved.
+        penalty: Penalty of the best solution; ``0`` means feasible.
+        cost: Cost of the best solution.
+        trace: Every improving trial in arrival order.
+        trials: Trials LKH completed, or ``None`` when the run was killed
+            before LKH printed its summary.
+        optimum: The ``OPTIMUM`` parameter the run was given, if any.
+        validated_cost: Cost recomputed in Python from the tour LKH wrote,
+            after checking coverage and vehicle capacity.  ``None`` when
+            validation was not requested, not possible, or failed.
+        validation_error: Why the independent check failed or could not
+            run; ``None`` when it passed or was not requested.
+        runtime_seconds: Wall-clock time of the process.
+        killed: ``True`` when the deadline stopped the process.
+        command: Full command line.
+        parameters: The parameter file content the run used.
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+    """
+
+    problem_path: Path
+    penalty: int
+    cost: int
+    trace: tuple[LkhTracePoint, ...]
+    trials: int | None
+    optimum: int | None
+    validated_cost: float | None
+    validation_error: str | None
+    runtime_seconds: float
+    killed: bool
+    command: tuple[str, ...]
+    parameters: str
+    stdout: str
+    stderr: str
+
+    @property
+    def reached_optimum(self) -> bool:
+        """Whether the run found a feasible solution no worse than ``optimum``."""
+        return (
+            self.optimum is not None and self.penalty == 0 and self.cost <= self.optimum
+        )
 
 
 def solve_lkh(
@@ -149,6 +245,240 @@ def solve_lkh(
         stdout=outcome.stdout,
         stderr=outcome.stderr,
     )
+
+
+def read_parameter_file(path: str | Path) -> dict[str, str]:
+    """Read an LKH parameter file into an ordered key-to-value mapping.
+
+    Keys are upper-cased.  A keyword without a value, such as ``SPECIAL``,
+    maps to an empty string.  A key that occurs several times keeps its last
+    value.
+
+    Raises:
+        OSError: If the file cannot be read.
+    """
+    parameters: dict[str, str] = {}
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.upper() == "EOF":
+            break
+        key, *rest = _PARAMETER_SPLIT.split(line, maxsplit=1)
+        parameters[key.upper()] = rest[0].strip() if rest else ""
+    return parameters
+
+
+def run_lkh_reported(
+    problem_path: str | Path,
+    *,
+    time_limit_seconds: float,
+    base_parameters: Mapping[str, str] | None = None,
+    overrides: Mapping[str, str | int | float] | None = None,
+    seed: int = 1,
+    deadline_seconds: float | None = None,
+    validate: bool = False,
+    cancel_event: threading.Event | None = None,
+    executable: str | Path | None = None,
+) -> LkhReport:
+    """Run LKH-3 on any supported problem type and report its own result.
+
+    The run is a single LKH run bounded by ``TIME_LIMIT``.  Its parameter
+    file is ``base_parameters`` without file paths and without the protocol
+    keys this function manages (runs, seed, limits, trace level), followed
+    by ``overrides``, so an override always wins over the base.
+
+    Args:
+        problem_path: Uncompressed problem file in a format LKH-3 reads.
+        time_limit_seconds: Search budget passed as ``TIME_LIMIT``.  LKH
+            starts this clock after its preprocessing.
+        base_parameters: Problem-specific settings, typically read with
+            :func:`read_parameter_file` from the parameter file published
+            with the instance.
+        overrides: Settings under test, e.g. ``{"MOVE_TYPE": "3 SPECIAL"}``.
+        seed: Random seed.
+        deadline_seconds: Wall-clock limit for the whole process.  A run
+            killed at the deadline still reports the best solution it had
+            printed.
+        validate: Also check the tour LKH wrote with the Python-side
+            validation of :func:`solve_lkh`.  Only TSP and CVRP can be
+            checked; the outcome lands in ``validated_cost`` and
+            ``validation_error`` and never raises.
+        cancel_event: When given, LKH runs in its own session, shielded from
+            a Ctrl+C in the terminal, and is killed once the event is set.
+        executable: LKH binary.  Defaults to ``LKH_BIN`` or the bundled
+            ``vendor/LKH``.
+
+    Returns:
+        The best ``(penalty, cost)`` LKH printed, with the improvement trace.
+
+    Raises:
+        ValueError: If a limit is not positive.
+        SolverError: If the problem file is gzipped, which LKH cannot read.
+        SolverCancelledError: If ``cancel_event`` was set during the run.
+        SolverExecutionError: If LKH fails or prints no solution at all.
+        FileNotFoundError: If the problem file or the executable is missing.
+    """
+    if time_limit_seconds <= 0:
+        raise ValueError(
+            f"time_limit_seconds must be positive, got {time_limit_seconds}"
+        )
+    if deadline_seconds is not None and deadline_seconds <= 0:
+        raise ValueError(f"deadline_seconds must be positive, got {deadline_seconds}")
+    path = Path(problem_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"{path} does not exist")
+    if path.name.endswith(".gz"):
+        raise SolverError(f"LKH cannot read the gzipped file {path.name}")
+    binary = find_executable("lkh", executable)
+
+    with tempfile.TemporaryDirectory(prefix="teaspoon-lkh-") as directory:
+        workdir = Path(directory)
+        lines = _reported_parameter_lines(
+            problem_path=path.resolve(),
+            tour_path=workdir / "solution.tour",
+            base_parameters=base_parameters or {},
+            overrides=overrides or {},
+            seed=seed,
+            time_limit_seconds=time_limit_seconds,
+        )
+        parameter_text = "\n".join(lines) + "\n"
+        parameter_path = workdir / "lkh.parameters"
+        parameter_path.write_text(parameter_text, encoding="utf-8")
+        outcome, streamed = run_process_streaming(
+            [binary, parameter_path],
+            solver="lkh",
+            cwd=workdir,
+            timeout_seconds=None,
+            deadline_seconds=deadline_seconds,
+            cancel_event=cancel_event,
+            new_session=cancel_event is not None,
+        )
+        validated_cost: float | None = None
+        validation_error: str | None = None
+        if validate:
+            validated_cost, validation_error = _validate_reported_tour(
+                path, workdir / "solution.tour", killed=outcome.killed
+            )
+
+    trace = parse_lkh_trace(streamed)
+    if not trace:
+        raise SolverExecutionError(
+            "lkh printed no solution"
+            + (" before the deadline" if outcome.killed else "")
+            + f"\nstdout:\n{outcome.stdout[-2000:]}\nstderr:\n{outcome.stderr[-2000:]}"
+        )
+    best = min(trace, key=lambda point: (point.penalty, point.cost))
+    optimum_text = {
+        **{key.upper(): value for key, value in (base_parameters or {}).items()},
+        **{key.upper(): str(value) for key, value in (overrides or {}).items()},
+    }.get("OPTIMUM")
+    return LkhReport(
+        problem_path=path,
+        penalty=best.penalty,
+        cost=best.cost,
+        trace=trace,
+        trials=_parse_trial_count(outcome.stdout),
+        optimum=int(optimum_text) if optimum_text else None,
+        validated_cost=validated_cost,
+        validation_error=validation_error,
+        runtime_seconds=outcome.runtime_seconds,
+        killed=outcome.killed,
+        command=outcome.command,
+        parameters=parameter_text,
+        stdout=outcome.stdout,
+        stderr=outcome.stderr,
+    )
+
+
+def _validate_reported_tour(
+    problem_path: Path, tour_path: Path, *, killed: bool
+) -> tuple[float | None, str | None]:
+    """Check LKH's tour file independently of LKH's own penalty.
+
+    Returns:
+        The recomputed cost and ``None``, or ``None`` and the reason the
+        tour is invalid or could not be checked.
+    """
+    if killed:
+        return None, "the run was killed before LKH wrote its final tour"
+    if not tour_path.is_file():
+        return None, "lkh wrote no tour file"
+    try:
+        instance = load_path(problem_path)
+        if instance.kind not in ("TSP", "CVRP"):
+            return None, f"no Python-side check for {instance.kind} instances"
+        routes = _read_routes(tour_path, instance, None)
+        return _compute_length(instance, routes, "file"), None
+    except (SolverError, ValueError) as error:
+        return None, str(error)
+
+
+def parse_lkh_trace(lines: Iterable[StreamedLine]) -> tuple[LkhTracePoint, ...]:
+    """Extract the improving trials from LKH's ``TRACE_LEVEL = 1`` output."""
+    points: list[LkhTracePoint] = []
+    for line in lines:
+        if line.stream != "stdout":
+            continue
+        match = _TRIAL_PATTERN.match(line.text)
+        if match is None:
+            continue
+        points.append(
+            LkhTracePoint(
+                wall_seconds=line.wall_seconds,
+                solver_seconds=float(match.group("seconds")),
+                trial=int(match.group("trial")),
+                penalty=int(match.group("penalty") or 0),
+                cost=int(match.group("cost")),
+            )
+        )
+    return tuple(points)
+
+
+def _reported_parameter_lines(
+    *,
+    problem_path: Path,
+    tour_path: Path,
+    base_parameters: Mapping[str, str],
+    overrides: Mapping[str, str | int | float],
+    seed: int,
+    time_limit_seconds: float,
+) -> list[str]:
+    """Build the parameter file lines of a reported run.
+
+    Base entries that name a file are dropped because their relative paths
+    do not survive the temporary working directory, and because an initial
+    or merge tour would bias a comparison of settings.
+    """
+    override_keys = {key.upper() for key in overrides}
+    entries: list[tuple[str, str]] = [("PROBLEM_FILE", str(problem_path))]
+    entries += [
+        (key.upper(), value)
+        for key, value in base_parameters.items()
+        if not key.upper().endswith("_FILE")
+        and key.upper() not in _MANAGED_PARAMETERS
+        and key.upper() not in override_keys
+    ]
+    entries += [
+        ("TOUR_FILE", str(tour_path)),
+        ("RUNS", "1"),
+        ("SEED", str(seed)),
+        ("TIME_LIMIT", f"{time_limit_seconds:g}"),
+        ("MAX_TRIALS", str(_UNBOUNDED_TRIALS)),
+        ("TRACE_LEVEL", "1"),
+    ]
+    entries += [(key.upper(), str(value)) for key, value in overrides.items()]
+    return [f"{key} = {value}" if value else key for key, value in entries]
+
+
+def _parse_trial_count(stdout: str) -> int | None:
+    """Return the trial count from LKH's final summary, if it was printed."""
+    for line in stdout.splitlines():
+        match = _TRIAL_COUNT_PATTERN.match(line)
+        if match is not None:
+            return int(match.group(1))
+    return None
 
 
 def _require_exact_capable(instance: Instance) -> None:

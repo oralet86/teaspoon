@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "entries": {
+    "CVRPTW": {
+      "source": "http://webhotel4.ruc.dk/~keld/research/LKH-3/BENCHMARKS/CVRPTW.tgz",
+      "fetched": "2026-10-12",
+      "sha256": "2e5c3914c63bcbcea43c61f4a10d7803419c9407338b583920f8fbd218e190b4",
+      "bytes": 2709578
+    },
+    "SOP": {
+      "source": "http://webhotel4.ruc.dk/~keld/research/LKH-3/BENCHMARKS/SOP.tgz",
+      "fetched": "2026-10-12",
+      "sha256": "f7add17a08a82c3e1b92fb1eeddcbda327be2a0789baeccfa678da4807d0f2ea",
+      "bytes": 15190625
+    },
+    "TSPTW": {
+      "source": "http://webhotel4.ruc.dk/~keld/research/LKH-3/BENCHMARKS/TSPTW.tgz",
+      "fetched": "2026-10-12",
+      "sha256": "836ac48d82ace3e09bd85619810969e823230b497c2a5ced2f36ccf743e9f4ef",
+      "bytes": 17437362
+    },
+    "mTSP": {
+      "source": "http://webhotel4.ruc.dk/~keld/research/LKH-3/BENCHMARKS/mTSP.tgz",
+      "fetched": "2026-10-12",
+      "sha256": "f2185a46fcf568bf8f7a68d79935c655b209a81f13adb65b93394436003e00ed",
+      "bytes": 32310297
+    }
+  }
+}

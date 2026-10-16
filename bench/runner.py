@@ -10,10 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import platform
-import sys
-import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -24,18 +20,13 @@ from solvers import (
     SolverResult,
     TracePoint,
     find_executable,
+    pyvrp_provenance,
     solve_filo2,
     solve_hgs,
+    solve_pyvrp,
 )
 
-from .metadata import (
-    cpu_metadata,
-    file_sha256,
-    git_metadata,
-    lockfile_digests,
-    package_versions,
-    thread_environment,
-)
+from .metadata import file_sha256, host_metadata
 from .metrics import primal_integral, time_to_target
 from .suites import bks_provenance, load_bks
 
@@ -53,7 +44,7 @@ class RunSpec:
 
     Attributes:
         instance_path: CVRP instance to solve.
-        solver: ``"hgs"`` or ``"filo2"``.
+        solver: ``"hgs"``, ``"filo2"`` or ``"pyvrp"``.
         seed: Random seed passed to the solver.
         budget_seconds: Search budget in seconds.
         arm: Experiment arm; only ``"baseline"`` exists today.
@@ -154,12 +145,21 @@ def _run_one(
         "budget_seconds": spec.budget_seconds,
         "arm": spec.arm,
     }
-    override = None if executables is None else executables.get(spec.solver)
-    try:
-        binary = find_executable(spec.solver, override)
-    except (OSError, ValueError) as error:
-        logger.warning("%s: %s", label, error)
-        return RunRecord(status="error", error=str(error), **common)
+    binary: Path | None = None
+    if spec.solver == "pyvrp":
+        # PyVRP is an in-process solver: its provenance is the installed
+        # version and the digest of the compiled core, not a binary path.
+        artifact, artifact_path = pyvrp_provenance()
+        artifact_sha256 = file_sha256(artifact_path)
+    else:
+        override = None if executables is None else executables.get(spec.solver)
+        try:
+            binary = find_executable(spec.solver, override)
+        except (OSError, ValueError) as error:
+            logger.warning("%s: %s", label, error)
+            return RunRecord(status="error", error=str(error), **common)
+        artifact = str(binary)
+        artifact_sha256 = file_sha256(binary)
 
     timeout_seconds = spec.budget_seconds + timeout_slack_seconds
     try:
@@ -179,14 +179,22 @@ def _run_one(
                 optimization_seconds=spec.budget_seconds,
                 timeout_seconds=timeout_seconds,
             )
+        elif spec.solver == "pyvrp":
+            # MaxRuntime limits the search itself; there is no process to
+            # kill, so timeout_seconds does not apply.
+            result = solve_pyvrp(
+                spec.instance_path,
+                seed=spec.seed,
+                time_limit_seconds=float(spec.budget_seconds),
+            )
         else:
             raise ValueError(f"unknown solver {spec.solver!r}")
     except (SolverError, OSError) as error:
         logger.warning("%s failed: %s", label, error)
         return RunRecord(
             status="error",
-            executable=str(binary),
-            executable_sha256=file_sha256(binary),
+            executable=artifact,
+            executable_sha256=artifact_sha256,
             error=str(error),
             **common,
         )
@@ -224,8 +232,8 @@ def _run_one(
         primal_integral=integral,
         runtime_seconds=result.runtime_seconds,
         trace_points=len(result.trace),
-        executable=str(binary),
-        executable_sha256=file_sha256(binary),
+        executable=artifact,
+        executable_sha256=artifact_sha256,
         trace_file=trace_file,
         log_file=log_file,
         solution_file=solution_file,
@@ -270,15 +278,7 @@ def _write_log(destination: Path, label: str, stdout: str, stderr: str) -> str:
 def _write_config(destination: Path, specs: Sequence[RunSpec]) -> None:
     """Write the run configuration and host metadata as ``config.json``."""
     configuration = {
-        "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "platform": platform.platform(),
-        "python": sys.version.split()[0],
-        "cpu_count": os.cpu_count(),
-        "cpu": cpu_metadata(),
-        "threads": thread_environment(),
-        "git": git_metadata(),
-        "lockfiles": lockfile_digests(),
-        "packages": package_versions(),
+        **host_metadata(),
         "specs": [
             {
                 "instance": str(spec.instance_path),

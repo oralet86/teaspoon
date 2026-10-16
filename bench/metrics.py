@@ -125,6 +125,13 @@ def primal_integral(
     return total
 
 
+def mean_or_nan(values: Sequence[float]) -> float:
+    """Return the arithmetic mean, or ``nan`` for an empty sequence."""
+    if not values:
+        return float("nan")
+    return sum(values) / len(values)
+
+
 def _ordered(trace: Sequence[TracePoint]) -> tuple[TracePoint, ...]:
     """Return the trace sorted by wall-clock time.
 

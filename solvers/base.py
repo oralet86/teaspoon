@@ -1,11 +1,12 @@
-"""Shared plumbing for the bundled command-line solver wrappers.
+"""Shared plumbing for the solver wrappers and their result model.
 
-The wrappers run the command-line solvers that live under ``vendor/`` (or
+The command-line wrappers run the solvers that live under ``vendor/`` (or
 wherever the matching environment variable points) and translate their
 file-based output into the format-agnostic model defined in
 :mod:`instances`.  Solver processes always run in a temporary working
 directory because the binaries drop scratch files next to their output,
-never next to the instance.
+never next to the instance.  The in-process PyVRP wrapper shares the result
+and validation helpers but runs no process.
 """
 
 from __future__ import annotations
@@ -49,12 +50,19 @@ SOLVER_SOURCES: Mapping[str, str] = {
 }
 
 
+_CANCEL_POLL_SECONDS = 0.1
+
+
 class SolverError(RuntimeError):
     """Raised when a solver wrapper cannot produce a valid solution."""
 
 
 class SolverTimeoutError(SolverError, TimeoutError):
     """Raised when a solver process exceeds the wall-clock limit."""
+
+
+class SolverCancelledError(SolverError):
+    """Raised when a solver process was stopped on request."""
 
 
 class SolverExecutionError(SolverError):
@@ -209,13 +217,24 @@ def find_executable(solver: str, override: str | Path | None = None) -> Path:
 
 @dataclass(eq=False, frozen=True, slots=True)
 class ProcessOutcome:
-    """Captured result of one solver process."""
+    """Captured result of one solver process.
+
+    Attributes:
+        command: Full command line.
+        returncode: Exit status; negative when the process was killed.
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+        runtime_seconds: Wall-clock time until the process ended.
+        killed: ``True`` when the process was stopped at a deadline and the
+            output is therefore incomplete.
+    """
 
     command: tuple[str, ...]
     returncode: int
     stdout: str
     stderr: str
     runtime_seconds: float
+    killed: bool = False
 
 
 def run_process(
@@ -274,18 +293,38 @@ def run_process_streaming(
     solver: str,
     cwd: Path,
     timeout_seconds: float | None,
+    deadline_seconds: float | None = None,
+    cancel_event: threading.Event | None = None,
+    new_session: bool = False,
 ) -> tuple[ProcessOutcome, tuple[StreamedLine, ...]]:
     """Run a solver command, timestamping every output line as it arrives.
 
     The timestamps form the wall-clock axis of anytime traces, so they do
     not depend on whatever clock the solver itself reports.
 
+    Args:
+        command: Executable and arguments.
+        solver: Solver name used in error messages.
+        cwd: Working directory of the process.
+        timeout_seconds: Limit after which the run counts as failed.
+        deadline_seconds: Limit after which the process is killed but its
+            output so far is still returned, for anytime solvers whose
+            progress lines already carry a usable result.  The earlier of
+            the two limits applies.
+        cancel_event: When set by another thread, the process is killed
+            and the call raises.
+        new_session: Start the process in its own session, so a Ctrl+C in
+            the terminal reaches only the caller and not the solver.
+
     Returns:
-        The captured process outcome and every line in arrival order.
+        The captured process outcome and every line in arrival order.  The
+        outcome has ``killed`` set when the deadline stopped the process.
 
     Raises:
         SolverTimeoutError: If the process exceeds ``timeout_seconds``.
-        SolverExecutionError: If the process cannot start or exits nonzero.
+        SolverCancelledError: If ``cancel_event`` was set during the run.
+        SolverExecutionError: If the process cannot start or exits nonzero
+            without having been killed at the deadline.
     """
     arguments = [str(argument) for argument in command]
     logger.debug("running %s in %s", " ".join(arguments), cwd)
@@ -298,6 +337,7 @@ def run_process_streaming(
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            start_new_session=new_session,
         )
     except OSError as error:
         raise SolverExecutionError(f"could not start {solver}: {error}") from error
@@ -327,15 +367,26 @@ def run_process_streaming(
     for thread in threads:
         thread.start()
 
+    deadline_applies = deadline_seconds is not None and (
+        timeout_seconds is None or deadline_seconds <= timeout_seconds
+    )
+    limit_seconds = deadline_seconds if deadline_applies else timeout_seconds
+    killed = False
     try:
-        returncode = process.wait(timeout=timeout_seconds)
+        returncode = _wait_for_process(process, started, limit_seconds, cancel_event)
     except subprocess.TimeoutExpired as error:
         process.kill()
+        returncode = process.wait()
+        if not deadline_applies:
+            raise SolverTimeoutError(
+                f"{solver} did not finish within {timeout_seconds} seconds; "
+                f"command: {' '.join(arguments)}"
+            ) from error
+        killed = True
+    except SolverCancelledError:
+        process.kill()
         process.wait()
-        raise SolverTimeoutError(
-            f"{solver} did not finish within {timeout_seconds} seconds; "
-            f"command: {' '.join(arguments)}"
-        ) from error
+        raise
     finally:
         for thread in threads:
             thread.join(timeout=5)
@@ -347,7 +398,7 @@ def run_process_streaming(
         stdout += "\n"
     if stderr:
         stderr += "\n"
-    if returncode != 0:
+    if returncode != 0 and not killed:
         raise SolverExecutionError(
             f"{solver} exited with code {returncode}\n"
             f"command: {' '.join(arguments)}\n"
@@ -360,8 +411,44 @@ def run_process_streaming(
         stdout=stdout,
         stderr=stderr,
         runtime_seconds=runtime_seconds,
+        killed=killed,
     )
     return outcome, tuple(lines)
+
+
+def _wait_for_process(
+    process: subprocess.Popen[str],
+    started: float,
+    limit_seconds: float | None,
+    cancel_event: threading.Event | None,
+) -> int:
+    """Wait for a process, watching a time limit and a cancel request.
+
+    Raises:
+        subprocess.TimeoutExpired: If ``limit_seconds`` pass first.
+        SolverCancelledError: If ``cancel_event`` is set first.
+    """
+    if cancel_event is None:
+        return process.wait(timeout=limit_seconds)
+    while True:
+        if cancel_event.is_set():
+            raise SolverCancelledError("the solver run was cancelled")
+        remaining = (
+            None
+            if limit_seconds is None
+            else limit_seconds - (time.perf_counter() - started)
+        )
+        if remaining is not None and remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, limit_seconds or 0.0)
+        step = (
+            _CANCEL_POLL_SECONDS
+            if remaining is None
+            else min(_CANCEL_POLL_SECONDS, remaining)
+        )
+        try:
+            return process.wait(timeout=step)
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def check_permutation(
@@ -388,6 +475,21 @@ def check_permutation(
         raise SolverExecutionError(
             f"{solver} wrote a tour that is not a permutation of 1..{expected_size}"
         )
+
+
+def require_cvrp(instance: Instance, solver: str) -> None:
+    """Check that the instance is a CVRP with a known dimension.
+
+    Raises:
+        SolverError: If the instance is not a CVRP or lacks a dimension.
+    """
+    if instance.kind != "CVRP":
+        raise SolverError(
+            f"{solver} solves CVRP instances only, but "
+            f"{instance.source_path.name} is {instance.kind}"
+        )
+    if instance.dimension is None:
+        raise SolverError(f"{instance.source_path.name} has no DIMENSION field")
 
 
 def require_length(
