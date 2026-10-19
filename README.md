@@ -1,21 +1,23 @@
 # teaspoon
 
-Experimental repository for research on metaheuristic optimization: adaptive
-operator selection (AOS) in a genetic algorithm for the TSP, and later in
-state-of-the-art routing solvers.
+Experimental repository for research on metaheuristic optimization: when
+does the choice of operator matter under a wall-clock time budget? The
+current study measures which local-search operator gains the most tour
+length per second in each state of a search on the TSP; later work applies
+operator selection inside state-of-the-art routing solvers such as LKH-3.
 
-Last updated: 2026-10-16
+Last updated: 2026-10-19
 
 ## Status
 
 - **Target:** GECCO 2027. The deadline was estimated as about 2027-01-26;
   confirm it against the official call.
-- **Active:** the GA study under `ga/`. Time box of one week: the GA
-  experiments are to be done by 2026-10-19.
-- **Paused:** the LKH-3 work. The setting pilot is built and was run on two
-  of three seeds; a full rerun is prepared.
-- **Later:** a vectorised version and a Rust port of the GA (Claim 3). The
-  Rust toolchain is installed.
+- **Active:** the Claim 1 study under `aos/`. E0 and the E1 main run are
+  done (2026-10-19, `journal/claim-1.md`); the full runs E2 to E5 are next.
+- **Paused:** the LKH-3 work. The setting pilot is built and has not been
+  run to completion.
+- **Later:** a Rust port of the experiments
+  ([`rust-port.md`](ideas/rust-port.md)). The Rust toolchain is installed.
 
 ## Contents
 
@@ -48,48 +50,46 @@ topic per file:
 | File | Contents |
 |---|---|
 | [`claims.md`](ideas/claims.md) | The ground rule on time, Claims 1 to 4, open points |
-| [`claim-1-plan.md`](ideas/claim-1-plan.md) | Setup and experiments E0 to E5 for Claim 1, verdict, to do |
+| [`claim-1-plan.md`](ideas/claim-1-plan.md) | Experiments E0 to E5 for Claim 1, their status, the verdict rule, to do |
 | [`claim-2-reward-notes.md`](ideas/claim-2-reward-notes.md) | Notes on the reward for a Claim 2 selector |
 | [`chained-selection.md`](ideas/chained-selection.md) | Idea: LK-style chaining of operators with a time-based advantage |
 | [`local-context-selection.md`](ideas/local-context-selection.md) | Idea: operator choice by local features of the anchor node (possible Claim 1.3) |
 | [`novelty.md`](ideas/novelty.md) | What is already published and what may still be new; recommended framing |
-| [`benchmark-protocol.md`](ideas/benchmark-protocol.md) | Draft settings for Claim 1: operators, slices, instances, budgets, metrics, statistics, logging |
-| [`results-so-far.md`](ideas/results-so-far.md) | The single GA run on kroA100 |
+| [`instances-and-operators.md`](ideas/instances-and-operators.md) | Generators and their papers, the 60 E1 instances, how the measured tours are built, seeds, the operators O1–O20, and how E1 measures them |
+| [`benchmark-protocol.md`](ideas/benchmark-protocol.md) | Draft settings for the full runs E2 to E5: algorithm frame, slices, budgets, metrics, statistics, logging |
+| [`softmax-policy.md`](ideas/softmax-policy.md) | Idea: greedy against softmax use of the E1 map, for E3 and Claim 2 |
+| [`instance-sets.md`](ideas/instance-sets.md) | History: the 2026-10-16 instance proposal for Claim 1.2, the literature on what matters, an unused shortlist |
 | [`prior-work.md`](ideas/prior-work.md) | Adaptive operator selection and time-aware selection in the literature |
-| [`lkh3.md`](ideas/lkh3.md) | LKH-3 background, the paused setting pilot and its result, to do |
+| [`lkh3.md`](ideas/lkh3.md) | LKH-3 background, the paused setting pilot, to do |
 | [`original-proposal.md`](ideas/original-proposal.md) | The hand-written research questions and protocol |
+| [`rust-port.md`](ideas/rust-port.md) | Draft specification of the Rust port of the experiments; open decisions remain |
 
 Notes on the papers read (one per source, with what each means for the
 claims) are in [`papers/notes/`](papers/notes/README.md); the reading list is
 [`papers/reading-list.md`](papers/reading-list.md). The whole `papers/`
-folder is currently gitignored, so these notes exist only locally.
+folder is currently gitignored, so these notes exist only locally, as do
+`ideas/` and `journal/`.
 
 ## Using the repository
 
-Development commands are in `AGENTS.md`: `uv run ruff format .`,
-`uv run ruff check .`, `uv run pyright .`, `uv run pytest`.
+Development commands (format, lint, typecheck, test) are in `AGENTS.md`.
 
-### Genetic algorithm
+### Claim 1 study (E1)
 
-`ga/` is a small steady-state GA for the symmetric TSP with adaptive operator
-selection. It needs no extra dependencies.
+`aos/` holds the scalar operators O1–O20 and the E1 pipeline: build the
+measured tours, measure every operator's marginal rate on them (gains
+untimed on every CPU, then times on one pinned core), and turn the run into
+journal data and figures:
 
 ```bash
-uv run python -m ga data/ALL_tsp/kroA100.tsp
-uv run python -m ga data/ALL_tsp/kroA100.tsp --selector uniform --seed 3
-uv run python -m ga data/ALL_tsp/kroA100.tsp --selector fixed:two_opt
+uv run python -m aos.e1_states --instances <paths> --seeds 0 1 2 --workers 6 --out runs/e1-main/<timestamp>
+uv run python -m aos.e1_marginal --states runs/e1-main/<timestamp> --budgeted --state-seconds 7.5 --repeats 32 --out runs/e1-main/<timestamp>/marginal --stage gains
+uv run python -m aos.e1_marginal --states runs/e1-main/<timestamp> --budgeted --state-seconds 7.5 --repeats 32 --out runs/e1-main/<timestamp>/marginal --stage times
+uv run python -m aos.analysis.e1_marginal runs/e1-main/<timestamp>/marginal --prefix e1main
 ```
 
-- `ga/operators.py`: swap, inversion, insertion, 2-opt and order crossover.
-  Each mutation changes the tour in place and returns the change in length.
-  Add an operator by writing one function and adding it to `MUTATIONS`.
-- `ga/selectors.py`: fixed, uniform, probability matching and adaptive
-  pursuit behind two methods, `select` and `update`. Add a strategy with one
-  class and one entry in `SELECTORS`.
-- `ga/algorithm.py`: the loop, which logs the operator and its length change
-  at every step.
-- The command prints the result, the gap to best-known when the instance has
-  a companion tour, and per-operator usage by phase of the run.
+`uv run python -m aos.e0` and `uv run python -m aos.e0_contention` check
+the clock first; timed stages must run on an otherwise idle machine.
 
 ### Instance viewer
 
@@ -217,6 +217,36 @@ uv run python -m generators --n 500 --count 20 --seed 0 --out data/generated/tra
 
 The generator samples the depot positioning, customer positioning, demand
 distribution and route-size families used by the X and XL sets.
+
+### Synthetic TSP instances
+
+`python -m generators.tsp` makes symmetric TSP instances with recognised
+generators only, and can solve each with Concorde (`--solve`) to write the
+`.opt.tour` companion:
+
+| kind | generator | notes |
+| --- | --- | --- |
+| `uniform` | DIMACS `portgen` | integer points uniform on 10^6 x 10^6 |
+| `clustered` | netgen `generateClusteredNetwork` (NETGEN set, Kerschke et al. 2018) | 5 clusters, generated on [0, 100]^2 and scaled to [0, 10^6]^2 |
+| `random_matrix` | DIMACS `portmgen` | entries uniform on 0..10^6-1, no triangle inequality |
+| `tspgen` | tspgen R package (Bossek et al. 2019) | 1,000 "sophisticated" mutations, scaled to [0, 10^6]^2 |
+
+The DIMACS sources (from
+https://dimacs.rutgers.edu/archive/Challenges/TSP/download.html) go in
+`vendor/dimacs/` and are built with `uv run python -m generators.dimacs`
+(`portgen` and `portmgen`; `portcgen` is not used);
+`DIMACS_DIR` overrides the directory.  Their output is written unchanged, so
+an instance equals the Challenge generator's output for the same seed.
+tspgen and netgen need R with `remotes::install_github("jakobbossek/tspgen")`,
+which installs netgen as a dependency;
+`Rscript` is taken from `TSPGEN_RSCRIPT` or `PATH`, and the R, tspgen and
+netgen versions are recorded in each instance's `COMMENT`.
+
+```bash
+uv run python -m generators.dimacs                     # build portgen and portmgen
+uv run python -m generators.tsp --kind uniform --n 200 --seed 0 --out data/generated/tsp --solve
+uv run python -m generators.tsp --kind tspgen --n 500 --count 5 --out data/generated/tsp
+```
 
 ### Benchmark runner
 
