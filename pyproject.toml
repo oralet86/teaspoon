@@ -10,15 +10,9 @@ requires-python = ">=3.14"
 dependencies = [
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
-    "ortools>=9.15.6755",
     "pyqtgraph>=0.14.0",
-    "pyright>=1.1.411",
     "pyside6-essentials>=6.11.2",
     "pyvrp>=0.14.0",
-    "rl4co>=0.7.0",
-    "ruff>=0.16.4",
-    "torch>=2.14.0",
-    "torchmetrics>=1.9.0",
 ]
 
 [tool.ruff]
@@ -38,11 +32,13 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
-    "integration: runs the real model (slow); use `uv run pytest -m integration`",
+    "integration: runs the vendored solver binaries (slow); use `uv run pytest -m integration`",
 ]
 addopts = "-m 'not integration'"
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.411",
     "pytest>=9.1.1",
+    "ruff>=0.16.4",
 ]
