@@ -1,6 +1,9 @@
 # conference/journal paper .pdf files 
 papers
 ideas
+journal
+reports
+images
 # tsplib, cvrplib, amazon last-mile challenge etc.
 data
 # specific executables for solvers like
