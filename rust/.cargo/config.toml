@@ -1,0 +1,4 @@
+# Target CPU is x86-64-v3 (AVX2)
+# so the build is reproducible on other machines.
+[build]
+rustflags = ["-C", "target-cpu=x86-64-v3"]

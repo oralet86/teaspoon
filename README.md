@@ -16,8 +16,10 @@ Last updated: 2026-10-19
   done (2026-10-19, `journal/claim-1.md`); the full runs E2 to E5 are next.
 - **Paused:** the LKH-3 work. The setting pilot is built and has not been
   run to completion.
-- **Later:** a Rust port of the experiments
-  ([`rust-port.md`](ideas/rust-port.md)). The Rust toolchain is installed.
+- **Now (2026-11-01):** the Rust port of the experiments
+  ([`rust-port.md`](ideas/rust-port.md)), under `rust/`. The Python code in
+  `aos/` is retired: it is a reference for the port only and is deleted
+  afterwards. Plan and status: [`roadmap.md`](roadmap.md).
 
 ## Contents
 
@@ -54,9 +56,10 @@ topic per file:
 | [`claim-2-reward-notes.md`](ideas/claim-2-reward-notes.md) | Notes on the reward for a Claim 2 selector |
 | [`chained-selection.md`](ideas/chained-selection.md) | Idea: LK-style chaining of operators with a time-based advantage |
 | [`local-context-selection.md`](ideas/local-context-selection.md) | Idea: operator choice by local features of the anchor node (possible Claim 1.3) |
-| [`novelty.md`](ideas/novelty.md) | What is already published and what may still be new; recommended framing |
+| [`novelty.md`](ideas/novelty.md) | What is already published and what may still be new |
 | [`instances-and-operators.md`](ideas/instances-and-operators.md) | Generators and their papers, the 60 E1 instances, how the measured tours are built, seeds, the operators O1–O20, and how E1 measures them |
 | [`benchmark-protocol.md`](ideas/benchmark-protocol.md) | Draft settings for the full runs E2 to E5: algorithm frame, slices, budgets, metrics, statistics, logging |
+| [`learned-candidates.md`](ideas/learned-candidates.md) | Claim 5: a learned candidate selector per level of the greedy cascade; oracle bound, baselines, related work |
 | [`softmax-policy.md`](ideas/softmax-policy.md) | Idea: greedy against softmax use of the E1 map, for E3 and Claim 2 |
 | [`instance-sets.md`](ideas/instance-sets.md) | History: the 2026-10-16 instance proposal for Claim 1.2, the literature on what matters, an unused shortlist |
 | [`prior-work.md`](ideas/prior-work.md) | Adaptive operator selection and time-aware selection in the literature |
