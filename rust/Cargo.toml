@@ -15,18 +15,26 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.104"
-arrow = { version = "60.1.0", default-features = false }
+arrow = { version = "60.1.0", default-features = false, features = ["csv"] }
 clap = { version = "4.6.7", features = ["derive"] }
 env_logger = "0.11.11"
 libc = "0.2.191"
 log = "0.4.35"
+perf-event2 = "0.7.4"
 parquet = { version = "60.1.0", default-features = false, features = ["arrow", "zstd"] }
 rand_core = "0.10.1"
 rand_xoshiro = "0.8.1"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 sha2 = "0.11.1"
 thiserror = "2.0.21"
+statrs = { version = "0.19.1", default-features = false, features = ["std"] }
+nalgebra = { version = "0.35.0", default-features = false, features = ["std"] }
+rand = { version = "0.10.3", default-features = false, features = ["alloc"] }
+nix = { version = "0.31.3", features = ["sched", "time", "resource"] }
+jiff = "0.2.38"
+procfs = { version = "0.18.0", default-features = false }
+rayon = "1.12.0"
 
 [dev-dependencies]
 proptest = "1.12.0"
