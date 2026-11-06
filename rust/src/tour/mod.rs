@@ -321,6 +321,17 @@ impl<L: Layout> Tour<L> {
         }
     }
 
+    /// Rebuilds the storage from the logical tour, leaving the tour, its
+    /// length and its undo log as they are.  Undo restores a tour
+    /// logically, but the two-level list's blocks can end up split and
+    /// oriented differently, so the same application can then move a
+    /// different number of positions; timing code calls this before each
+    /// timed sample so every sample starts from the same storage.
+    pub fn normalize(&mut self) {
+        let order = self.order();
+        self.layout = L::from_order(&order);
+    }
+
     /// The visiting order forward from city 0.
     pub fn order(&self) -> Vec<City> {
         let mut order = Vec::with_capacity(self.n());
