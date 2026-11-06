@@ -13,7 +13,7 @@
 //! "Storage order" below is the order of blocks in `order`, each read
 //! forward, or backward when its bit is set.  Blocks are kept in a vector
 //! with ranks and offsets rather than LKH's linked list of parents; the
-//! cost per reversal is the same O(√n) (`rust/DEVIATIONS.md`).
+//! cost per reversal is the same O(√n).
 
 use super::Layout;
 use crate::City;

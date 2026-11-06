@@ -12,8 +12,9 @@
 //!
 //! Output: `states/<instance>_s<seed>.json` in the format of the Python
 //! builder, so measurement A reads either.  The random draws differ from
-//! Python's (`rust/DEVIATIONS.md` D10), so the tours do too; to measure the
-//! Python tours exactly, point measurement A at the Python states.
+//! Python's (seeded xoshiro256++ streams, [`crate::rng`]), so the tours do
+//! too; to measure the Python tours exactly, point measurement A at the
+//! Python states.
 
 use std::path::{Path, PathBuf};
 

@@ -9,9 +9,10 @@
 //!
 //! Run with `cargo test --test external -- --ignored`.
 //!
-//! Build the flipper harness from a built Concorde tree `$C`:
-//! `gcc -O1 -I$C/INCLUDE -o harness rust/tools/concorde_flip_harness.c
-//! $C/LINKERN/flip_two.o $C/concorde.a -lm`.
+//! The flipper harness, linked against a built Concorde tree, reads `n m`
+//! and then `m` lines `x y` from stdin, applies
+//! `CClinkern_flipper_flip(F, x, y)` to the identity cycle for each, and
+//! prints `CClinkern_flipper_next` of every city after each flip.
 //! LKH output for the alpha check: run `vendor/LKH` on a parameter file with
 //! `MAX_CANDIDATES = 5`, `CANDIDATE_FILE = <dir>/<name>.cand`,
 //! `PI_FILE = <dir>/<name>.pi`, `RUNS = 1`, `MAX_TRIALS = 1`.

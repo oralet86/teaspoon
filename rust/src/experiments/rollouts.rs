@@ -1,6 +1,5 @@
 //! E1R: does the greedy E1 choice pay off later?  Rollouts for Claim 1.4
-//! (`aos/rollouts.py`, `aos/e1_rollouts.py`, `aos/analysis/e1_rollouts.py`;
-//! `ideas/rust-port.md` §8.5).
+//! (a port of the Python E1R pipeline; `ideas/rust-port.md` §8.5).
 //!
 //! For a sample of measured states s, every candidate first operator o
 //! (the leader G(s), the policy's choice, the next operators by rate) gets
@@ -21,7 +20,7 @@
 //! every CPU and `validate` replays some with real timing (also per
 //! slice), which must reproduce them exactly.
 //!
-//! **Stall rule** (roadmap decision D1).  With `none`, the policy always
+//! **Stall rule.**  With `none`, the policy always
 //! applies its class leader, as in the Python test run, where it stalled:
 //! a tour that only the full 2-opt scan can improve is "2-opt open", but
 //! the class leader (O14) cannot improve it.  With `skip`, a policy slice

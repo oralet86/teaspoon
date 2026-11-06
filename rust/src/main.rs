@@ -214,7 +214,7 @@ struct E1rArgs {
     /// Calibration horizon in slices (plan only).
     #[arg(long, default_value_t = 16)]
     calibration_slices: usize,
-    /// Continuation policy on a slice without gain (plan only; decision D1).
+    /// Continuation policy on a slice without gain (plan only).
     #[arg(long, value_enum, default_value_t = rollouts::StallRule::None)]
     stall_rule: rollouts::StallRule,
     /// Rollouts replayed with real timing (plan or validate).

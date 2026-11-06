@@ -14,8 +14,8 @@ Last updated: 2026-11-05
   confirm it against the official call.
 - **Code:** every experiment now runs in Rust, under `rust/` (the `aos`
   binary). The Python package `aos/` is retired: a reference only, to be
-  deleted once the port is accepted. Plan and status:
-  [`roadmap.md`](roadmap.md); spec: [`rust-port.md`](ideas/rust-port.md).
+  deleted once the port is accepted. Spec:
+  [`rust-port.md`](ideas/rust-port.md).
 - **Active:** Claim 1. Measurement A was rerun in Rust on 1,280 states
   (2026-11-02/03); the E1R rollouts for Claim 1.4 ran with every
   candidate at three slice lengths (2026-11-05). Results and caveats are
@@ -73,7 +73,6 @@ topic per file:
 | [`original-proposal.md`](ideas/original-proposal.md) | The hand-written research questions and protocol |
 | [`rust-port.md`](ideas/rust-port.md) | Specification of the Rust port of the experiments |
 | [`e1r-overnight-plan.md`](ideas/e1r-overnight-plan.md) | The E1R night of 2026-11-05: questions, runs, budget, retired operators |
-| [`roadmap.md`](roadmap.md) | Plan of record for the port and the work after it; decisions waiting |
 
 Notes on the papers read (one per source, with what each means for the
 claims) are in [`papers/notes/`](papers/notes/README.md); the reading list is
@@ -102,10 +101,7 @@ rust/target/release/aos measure --states <states> --out runs/<dir> --stage summa
 rust/tools/unlock-clock.sh
 ```
 
-Whole nights are chained by scripts: `rust/tools/overnight.sh`
-(measurement A and robustness factors) and `rust/tools/e1r-night.sh`
-(E1R; it pairs with the root job `rust/tools/e1r-clock-switch.sh`, which
-unlocks the clock for the untimed rollouts). Every run directory holds a
+Every run directory holds a
 `config.json` with the code digest and machine state. Journal figures are
 drawn by scripts under `journal/scripts/` from CSV exports in
 `journal/data/`.
