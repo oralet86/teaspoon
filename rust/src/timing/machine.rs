@@ -86,6 +86,44 @@ pub fn temperature_c() -> Option<f64> {
     None
 }
 
+/// The current level of an `amdgpu` power-management clock (`fclk`, the
+/// data fabric; `mclk`, memory; `socclk`), MHz, from the line marked `*`
+/// of `pp_dpm_<clock>`.  On an APU these clocks are shared with the CPU
+/// and change with load unless the GPU's performance level is forced
+/// (`power_dpm_force_performance_level`, root), so memory-bound timings
+/// can depend on them.  `None` without an `amdgpu` device.
+pub fn soc_clock_mhz(clock: &str) -> Option<u32> {
+    for entry in std::fs::read_dir("/sys/class/drm").ok()?.flatten() {
+        let path = entry.path().join("device").join(format!("pp_dpm_{clock}"));
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let line = text.lines().find(|line| line.trim_end().ends_with('*'))?;
+        let digits: String = line
+            .split(':')
+            .nth(1)?
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect();
+        return digits.parse().ok();
+    }
+    None
+}
+
+/// The amdgpu power level of the first device that has one.
+pub fn soc_power_level() -> Option<String> {
+    for entry in std::fs::read_dir("/sys/class/drm").ok()?.flatten() {
+        if let Some(level) = read_trimmed(
+            entry
+                .path()
+                .join("device/power_dpm_force_performance_level"),
+        ) {
+            return Some(level);
+        }
+    }
+    None
+}
+
 /// Whether the machine runs on mains power; `None` when no supply reports
 /// (a desktop without a battery counts as mains).
 pub fn on_mains() -> Option<bool> {
@@ -114,6 +152,15 @@ pub struct MachineState {
     pub frequency_limits: Vec<(usize, Option<u64>, Option<u64>)>,
     /// Package temperature, °C.
     pub temperature_c: Option<f64>,
+    /// Data-fabric clock, MHz (APU; see [`soc_clock_mhz`]).
+    pub fclk_mhz: Option<u32>,
+    /// Memory clock, MHz (APU; see [`soc_clock_mhz`]).
+    pub mclk_mhz: Option<u32>,
+    /// The amdgpu power level (`power_dpm_force_performance_level`);
+    /// `None` without an amdgpu device.
+    pub soc_power_level: Option<String>,
+    /// SMT control (`on`, `off`, `forceoff`, `notsupported`, …).
+    pub smt: Option<String>,
     /// On mains power.
     pub on_mains: Option<bool>,
 }
@@ -134,6 +181,10 @@ impl MachineState {
                 })
                 .collect(),
             temperature_c: temperature_c(),
+            fclk_mhz: soc_clock_mhz("fclk"),
+            mclk_mhz: soc_clock_mhz("mclk"),
+            soc_power_level: soc_power_level(),
+            smt: read_trimmed(format!("{CPUS}/smt/control")),
             on_mains: on_mains(),
         }
     }
@@ -165,6 +216,20 @@ impl MachineState {
                 _ => problems.push(format!("cpu{cpu} frequency limits unknown")),
             }
         }
+        // On an APU the data-fabric and memory clocks follow load unless
+        // the GPU's power level is forced; memory-bound timings then depend
+        // on how busy the rest of the chip is (E0, 2026-11-02).
+        if let Some(level) = &self.soc_power_level
+            && level != "high"
+        {
+            problems.push(format!(
+                "amdgpu power level is {level}, not high (fabric and memory clocks follow load)"
+            ));
+        }
+        // A task on the timed core's SMT sibling slows it by up to half.
+        if self.smt.as_deref() == Some("on") {
+            problems.push("SMT is on (tasks on a timed core's sibling slow it)".to_string());
+        }
         if self.on_mains == Some(false) {
             problems.push("running on battery".to_string());
         }
@@ -184,6 +249,11 @@ pub fn require_locked(cpus: &[usize], allow_unlocked: bool) -> anyhow::Result<Ve
     if let Err(error) = super::cycles::ThreadCounters::open() {
         problems.push(format!(
             "core-cycle counter unavailable, frequency drift cannot be checked: {error:#}"
+        ));
+    }
+    if let Err(error) = super::counters::check() {
+        problems.push(format!(
+            "instruction and cycle counts of timed regions unavailable: {error}"
         ));
     }
     if problems.is_empty() {

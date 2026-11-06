@@ -44,7 +44,15 @@ pub fn siblings(cpu: usize) -> anyhow::Result<Vec<usize>> {
 }
 
 /// One logical CPU per physical core (the lowest-numbered sibling),
-/// restricted to the allowed CPUs.
+/// restricted to the allowed CPUs, quietest first: ordered by the
+/// interrupts each has handled since boot ([`interrupts_per_cpu`]).
+///
+/// Experiments time on the first core and run their untimed main thread
+/// on the last.  Device interrupts stay on fixed cores (without
+/// irqbalance), and CPU 0 also takes most of the kernel's timer ticks; on
+/// 2026-11-02 it also served the USB controller and spent about 3% more
+/// user-mode cycles on the same instructions than the other cores for ten
+/// minutes, then recovered: the contention gate's closing-phase drift.
 ///
 /// # Errors
 ///
@@ -59,7 +67,56 @@ pub fn physical_cores() -> anyhow::Result<Vec<usize>> {
             chosen.push(cpu);
         }
     }
+    match interrupts_per_cpu() {
+        Ok(counts) => {
+            chosen.sort_by_key(|cpu| (counts.get(cpu).copied().unwrap_or(u64::MAX), *cpu));
+        }
+        Err(error) => {
+            log::warn!("cores kept in numeric order, interrupt counts unreadable: {error:#}");
+        }
+    }
     Ok(chosen)
+}
+
+/// Interrupts each online CPU has handled since boot (all sources of
+/// `/proc/interrupts`: devices, timers, inter-processor calls), indexed by
+/// CPU number.
+///
+/// # Errors
+///
+/// If the file cannot be read or its header names no CPU.
+pub fn interrupts_per_cpu() -> anyhow::Result<std::collections::BTreeMap<usize, u64>> {
+    let text = std::fs::read_to_string("/proc/interrupts").context("reading /proc/interrupts")?;
+    let mut lines = text.lines();
+    let cpus: Vec<usize> = lines
+        .next()
+        .context("/proc/interrupts is empty")?
+        .split_whitespace()
+        .filter_map(|column| column.strip_prefix("CPU")?.parse().ok())
+        .collect();
+    if cpus.is_empty() {
+        bail!("/proc/interrupts names no CPU");
+    }
+    let mut totals: std::collections::BTreeMap<usize, u64> =
+        cpus.iter().map(|&cpu| (cpu, 0)).collect();
+    for line in lines {
+        let Some((_, counts)) = line.split_once(':') else {
+            continue;
+        };
+        // One count per CPU column, then the source's description; a few
+        // lines (ERR, MIS) have a single machine-wide count, ignored.
+        let counts: Vec<u64> = counts
+            .split_whitespace()
+            .map_while(|token| token.parse().ok())
+            .collect();
+        if counts.len() != cpus.len() {
+            continue;
+        }
+        for (cpu, count) in cpus.iter().zip(counts) {
+            *totals.entry(*cpu).or_default() += count;
+        }
+    }
+    Ok(totals)
 }
 
 /// Restricts the calling thread to logical CPU `cpu`.
