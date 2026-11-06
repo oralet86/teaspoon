@@ -6,20 +6,26 @@ current study measures which local-search operator gains the most tour
 length per second in each state of a search on the TSP; later work applies
 operator selection inside state-of-the-art routing solvers such as LKH-3.
 
-Last updated: 2026-10-19
+Last updated: 2026-11-05
 
 ## Status
 
 - **Target:** GECCO 2027. The deadline was estimated as about 2027-01-26;
   confirm it against the official call.
-- **Active:** the Claim 1 study under `aos/`. E0 and the E1 main run are
-  done (2026-10-19, `journal/claim-1.md`); the full runs E2 to E5 are next.
+- **Code:** every experiment now runs in Rust, under `rust/` (the `aos`
+  binary). The Python package `aos/` is retired: a reference only, to be
+  deleted once the port is accepted. Plan and status:
+  [`roadmap.md`](roadmap.md); spec: [`rust-port.md`](ideas/rust-port.md).
+- **Active:** Claim 1. Measurement A was rerun in Rust on 1,280 states
+  (2026-11-02/03); the E1R rollouts for Claim 1.4 ran with every
+  candidate at three slice lengths (2026-11-05). Results and caveats are
+  in `journal/claim-1.md`.
+- **Operators:** 16 of the original 21 remain; O2, O3, O4, O6 and O20
+  were retired on 2026-11-05 (rule in
+  [`instances-and-operators.md`](ideas/instances-and-operators.md) §5).
+  The others keep their numbers.
 - **Paused:** the LKH-3 work. The setting pilot is built and has not been
   run to completion.
-- **Now (2026-11-01):** the Rust port of the experiments
-  ([`rust-port.md`](ideas/rust-port.md)), under `rust/`. The Python code in
-  `aos/` is retired: it is a reference for the port only and is deleted
-  afterwards. Plan and status: [`roadmap.md`](roadmap.md).
 
 ## Contents
 
@@ -65,7 +71,9 @@ topic per file:
 | [`prior-work.md`](ideas/prior-work.md) | Adaptive operator selection and time-aware selection in the literature |
 | [`lkh3.md`](ideas/lkh3.md) | LKH-3 background, the paused setting pilot, to do |
 | [`original-proposal.md`](ideas/original-proposal.md) | The hand-written research questions and protocol |
-| [`rust-port.md`](ideas/rust-port.md) | Draft specification of the Rust port of the experiments; open decisions remain |
+| [`rust-port.md`](ideas/rust-port.md) | Specification of the Rust port of the experiments |
+| [`e1r-overnight-plan.md`](ideas/e1r-overnight-plan.md) | The E1R night of 2026-11-05: questions, runs, budget, retired operators |
+| [`roadmap.md`](roadmap.md) | Plan of record for the port and the work after it; decisions waiting |
 
 Notes on the papers read (one per source, with what each means for the
 claims) are in [`papers/notes/`](papers/notes/README.md); the reading list is
@@ -77,22 +85,30 @@ folder is currently gitignored, so these notes exist only locally, as do
 
 Development commands (format, lint, typecheck, test) are in `AGENTS.md`.
 
-### Claim 1 study (E1)
+### Claim 1 study (Rust)
 
-`aos/` holds the scalar operators O1–O20 and the E1 pipeline: build the
-measured tours, measure every operator's marginal rate on them (gains
-untimed on every CPU, then times on one pinned core), and turn the run into
-journal data and figures:
+`rust/` builds one binary, `aos`, with a subcommand per stage (`aos
+--help`): `clock`, `e0`, `states`, `measure` (measurement A: gains on
+every CPU, then times on one pinned core), `e1r` (plan, calibrate, run,
+validate, analyse), `population`, `compare` and `show` (prints a Parquet
+table as CSV). Timed stages need a locked clock and an idle machine:
 
 ```bash
-uv run python -m aos.e1_states --instances <paths> --seeds 0 1 2 --workers 6 --out runs/e1-main/<timestamp>
-uv run python -m aos.e1_marginal --states runs/e1-main/<timestamp> --budgeted --state-seconds 7.5 --repeats 32 --out runs/e1-main/<timestamp>/marginal --stage gains
-uv run python -m aos.e1_marginal --states runs/e1-main/<timestamp> --budgeted --state-seconds 7.5 --repeats 32 --out runs/e1-main/<timestamp>/marginal --stage times
-uv run python -m aos.analysis.e1_marginal runs/e1-main/<timestamp>/marginal --prefix e1main
+cargo build --release --manifest-path rust/Cargo.toml
+rust/tools/lock-clock.sh                    # boost off, SMT off, fixed fabric clock
+rust/target/release/aos measure --states <states> --out runs/<dir> --stage gains
+rust/target/release/aos measure --states <states> --out runs/<dir> --stage times
+rust/target/release/aos measure --states <states> --out runs/<dir> --stage summarise
+rust/tools/unlock-clock.sh
 ```
 
-`uv run python -m aos.e0` and `uv run python -m aos.e0_contention` check
-the clock first; timed stages must run on an otherwise idle machine.
+Whole nights are chained by scripts: `rust/tools/overnight.sh`
+(measurement A and robustness factors) and `rust/tools/e1r-night.sh`
+(E1R; it pairs with the root job `rust/tools/e1r-clock-switch.sh`, which
+unlocks the clock for the untimed rollouts). Every run directory holds a
+`config.json` with the code digest and machine state. Journal figures are
+drawn by scripts under `journal/scripts/` from CSV exports in
+`journal/data/`.
 
 ### Instance viewer
 
