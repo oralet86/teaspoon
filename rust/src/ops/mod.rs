@@ -1,5 +1,7 @@
 //! The operators O1-O21 (`ideas/rust-port.md` §6), ported from
 //! `aos/operators.py` with the move definitions and acceptance rules kept.
+//! O2, O3, O4, O6 and O20 were retired on 2026-11-05 (see [`RETIRED`]);
+//! the other 16 keep their protocol numbers.
 //!
 //! Every application takes the tour, the instance ([`Problem`]), its random
 //! stream, the work counters and an optional anchor, and returns the length
@@ -18,7 +20,6 @@ mod or_opt;
 mod random;
 mod recreate;
 mod scan;
-mod segment;
 mod three_opt;
 mod two_opt;
 
@@ -163,61 +164,67 @@ fn pick_anchor(n: usize, rng: &mut Stream, anchor: Option<City>) -> City {
 }
 
 /// The operators, in protocol order (O1 is `Swap`).
+///
+/// The discriminant is the protocol number minus one and is fixed: the
+/// retired operators O2, O3, O4, O6 and O20 leave gaps, so every other
+/// operator keeps the identifier it has in the journal and in earlier
+/// runs. Use [`Op::index`], not `as usize`, for a position in [`Op::ALL`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(u8)]
 pub enum Op {
     /// O1: exchange the anchor with a random other city.
-    Swap,
-    /// O2: move the anchor to a random edge.
-    Insertion,
-    /// O3: reverse a random segment from the anchor.
-    Inversion,
-    /// O4: move 1-3 cities at the anchor to a random edge.
-    OrOpt,
+    Swap = 0,
     /// O5: first improving 2-opt move at the anchor, full scan.
-    TwoOptFirst,
-    /// O6: best improving 2-opt move at the anchor, full scan.
-    TwoOptBest,
+    TwoOptFirst = 4,
     /// O7: first improving 2-opt move at the anchor, neighbour list.
-    TwoOptNl,
+    TwoOptNl = 6,
     /// O8: segment exchange at the anchor's edge, then O7 descent.
-    Kick,
+    Kick = 7,
     /// O9: first improving Or-opt move at the anchor, neighbour list.
-    OrOptNl,
+    OrOptNl = 8,
     /// O10: first improving sequential 3-opt move at the anchor.
-    ThreeOptNl,
+    ThreeOptNl = 9,
     /// O11: radial ruin and greedy recreate.
-    RuinRecreate,
+    RuinRecreate = 10,
     /// O12: double bridge at the anchor and 3 random cuts, then O7.
-    DoubleBridge,
+    DoubleBridge = 11,
     /// O13: double bridge at the anchor and 3 neighbours, then O7.
-    DoubleBridgeLocal,
+    DoubleBridgeLocal = 12,
     /// O14: O7 descent with a work queue, started at the anchor.
-    TwoOptDescent,
+    TwoOptDescent = 13,
     /// O15: O7 at the worst-edge city of a tournament of 8.
-    TwoOptTargeted,
+    TwoOptTargeted = 14,
     /// O16: Lin-Kernighan step of up to 25 chained 2-opt moves.
-    LinKernighan,
+    LinKernighan = 15,
     /// O17: O7 over the 5 alpha-nearness candidates.
-    TwoOptAlpha,
+    TwoOptAlpha = 16,
     /// O18: O16 over the 5 alpha-nearness candidates.
-    LinKernighanAlpha,
+    LinKernighanAlpha = 17,
     /// O19: SISR string removal and blink recreate.
-    StringRemoval,
-    /// O20: exchange 1-3-city segments at the anchor and a neighbour.
-    SegmentExchange,
+    StringRemoval = 18,
     /// O21: O8's segment exchange repaired by an LK descent (chained LK).
-    LkKick,
+    LkKick = 20,
 }
+
+/// Names of the operators retired on 2026-11-05: O2 insertion, O3
+/// inversion and O4 or_opt (random moves), O6 two_opt_best and O20
+/// segment_exchange. In the 2026-11-02 measurement A (1,280 states) each
+/// led under 1% of the states and was among a state's five best rates in
+/// under 5% (`ideas/e1r-overnight-plan.md`). Runs made before the
+/// retirement still hold rows for them; [`Op::parse_stored`] skips those.
+pub const RETIRED: [&str; 5] = [
+    "insertion",
+    "inversion",
+    "or_opt",
+    "two_opt_best",
+    "segment_exchange",
+];
 
 impl Op {
     /// Every operator in protocol order.
-    pub const ALL: [Op; 21] = [
+    pub const ALL: [Op; 16] = [
         Op::Swap,
-        Op::Insertion,
-        Op::Inversion,
-        Op::OrOpt,
         Op::TwoOptFirst,
-        Op::TwoOptBest,
         Op::TwoOptNl,
         Op::Kick,
         Op::OrOptNl,
@@ -231,7 +238,6 @@ impl Op {
         Op::TwoOptAlpha,
         Op::LinKernighanAlpha,
         Op::StringRemoval,
-        Op::SegmentExchange,
         Op::LkKick,
     ];
 
@@ -239,11 +245,7 @@ impl Op {
     pub fn name(self) -> &'static str {
         match self {
             Op::Swap => "swap",
-            Op::Insertion => "insertion",
-            Op::Inversion => "inversion",
-            Op::OrOpt => "or_opt",
             Op::TwoOptFirst => "two_opt_first",
-            Op::TwoOptBest => "two_opt_best",
             Op::TwoOptNl => "two_opt_nl",
             Op::Kick => "kick",
             Op::OrOptNl => "or_opt_nl",
@@ -257,7 +259,6 @@ impl Op {
             Op::TwoOptAlpha => "two_opt_alpha",
             Op::LinKernighanAlpha => "lin_kernighan_alpha",
             Op::StringRemoval => "string_removal",
-            Op::SegmentExchange => "segment_exchange",
             Op::LkKick => "lk_kick",
         }
     }
@@ -267,7 +268,31 @@ impl Op {
         Op::ALL.into_iter().find(|op| op.name() == name)
     }
 
-    /// Protocol identifier, `O1` to `O21`.
+    /// The operator called `name` in a stored table: `None` for a retired
+    /// operator (see [`RETIRED`]), whose rows earlier runs still hold.
+    ///
+    /// # Errors
+    ///
+    /// If `name` is neither a current nor a retired operator.
+    pub fn parse_stored(name: &str) -> anyhow::Result<Option<Op>> {
+        match Op::from_name(name) {
+            Some(op) => Ok(Some(op)),
+            None if RETIRED.contains(&name) => Ok(None),
+            None => anyhow::bail!("unknown operator {name}"),
+        }
+    }
+
+    /// Position in [`Op::ALL`], for per-operator arrays of length
+    /// `Op::ALL.len()`.
+    pub fn index(self) -> usize {
+        Op::ALL
+            .iter()
+            .position(|&op| op == self)
+            .expect("every operator is in Op::ALL")
+    }
+
+    /// Protocol identifier (`O1`, `O5`, …, `O21`), stable across the
+    /// retirement of O2-O4, O6 and O20.
     pub fn id(self) -> String {
         format!("O{}", self as usize + 1)
     }
@@ -278,7 +303,6 @@ impl Op {
         matches!(
             self,
             Op::TwoOptFirst
-                | Op::TwoOptBest
                 | Op::TwoOptNl
                 | Op::OrOptNl
                 | Op::ThreeOptNl
@@ -286,18 +310,13 @@ impl Op {
                 | Op::LinKernighan
                 | Op::TwoOptAlpha
                 | Op::LinKernighanAlpha
-                | Op::SegmentExchange
         )
     }
 
     /// Operator family (`aos.operators.FAMILIES`; O21 joins the kicks).
     pub fn family(self) -> &'static str {
         match self {
-            Op::TwoOptFirst
-            | Op::TwoOptBest
-            | Op::TwoOptNl
-            | Op::TwoOptDescent
-            | Op::TwoOptTargeted => "two_opt",
+            Op::TwoOptFirst | Op::TwoOptNl | Op::TwoOptDescent | Op::TwoOptTargeted => "two_opt",
             Op::Kick | Op::DoubleBridge | Op::DoubleBridgeLocal | Op::LkKick => "kick",
             other => other.name(),
         }
@@ -320,11 +339,7 @@ impl Op {
     ) -> Application {
         match self {
             Op::Swap => random::swap(tour, problem, rng, work, anchor),
-            Op::Insertion => random::insertion(tour, problem, rng, work, anchor),
-            Op::Inversion => random::inversion(tour, problem, rng, work, anchor),
-            Op::OrOpt => random::or_opt(tour, problem, rng, work, anchor),
-            Op::TwoOptFirst => scan::two_opt_scan(tour, problem, rng, work, anchor, false),
-            Op::TwoOptBest => scan::two_opt_scan(tour, problem, rng, work, anchor, true),
+            Op::TwoOptFirst => scan::two_opt_first(tour, problem, rng, work, anchor),
             Op::TwoOptNl => {
                 two_opt::two_opt_nl(tour, problem, rng, work, anchor, problem.neighbours)
             }
@@ -346,7 +361,6 @@ impl Op {
                 lk::lin_kernighan(tour, problem, rng, work, anchor, problem.alpha_lists())
             }
             Op::StringRemoval => recreate::string_removal(tour, problem, rng, work, anchor),
-            Op::SegmentExchange => segment::segment_exchange(tour, problem, rng, work, anchor),
             Op::LkKick => kicks::lk_kick(tour, problem, rng, work, anchor),
         }
     }

@@ -404,5 +404,26 @@ fn operator_names_round_trip() {
         assert_eq!(Op::from_name(op.name()), Some(op));
     }
     assert_eq!(Op::LkKick.id(), "O21");
-    assert_eq!(Op::ALL.iter().filter(|op| op.deterministic()).count(), 10);
+    assert_eq!(Op::ALL.iter().filter(|op| op.deterministic()).count(), 8);
+}
+
+#[test]
+fn retirement_keeps_protocol_ids_and_skips_retired_names() {
+    // O2-O4, O6 and O20 were retired; every other operator keeps its id.
+    let ids: Vec<String> = Op::ALL.iter().map(|op| op.id()).collect();
+    let expected = [1, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21];
+    assert_eq!(
+        ids,
+        expected.map(|number| format!("O{number}")).to_vec(),
+        "protocol ids moved"
+    );
+    for (position, op) in Op::ALL.into_iter().enumerate() {
+        assert_eq!(op.index(), position);
+    }
+    for name in aos::ops::RETIRED {
+        assert!(Op::from_name(name).is_none(), "{name} is still an operator");
+        assert!(Op::parse_stored(name).unwrap().is_none());
+    }
+    assert_eq!(Op::parse_stored("swap").unwrap(), Some(Op::Swap));
+    assert!(Op::parse_stored("no_such_operator").is_err());
 }
