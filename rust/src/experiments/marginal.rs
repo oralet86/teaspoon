@@ -44,7 +44,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, bail};
@@ -52,38 +51,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::common::{
-    CLASSES, EARLY_STATES, Implementation, Job, Pass, Sample, StateRecord, all_cpus,
-    batched_counts, batched_time, dispatch, improving_replays, instance_family, load_instance,
-    parallel_map, read_states_directory, sampled_batch, state_rank, timed_restores, tour_of,
-    warm_up,
+    CLASSES, Implementation, InstanceCache, Job, Pass, Sample, StateRecord, batched_counts,
+    batched_time, dispatch, improving_replays, instance_family, parallel_map,
+    read_states_directory, sampled_batch, timed_restores, untimed_workers, warm_up,
 };
+use super::states::{EARLY_STATES, EARLY_STATES_MAX_N, state_rank};
 use super::{mean, quantile, standard_deviation};
 use crate::City;
 use crate::instance::Instance;
 use crate::instance::storage::Dist;
 use crate::io::parquet::{
-    Column, Table, column_bool, column_f64, column_i64, column_str, has_part, parts_directory,
-    read, write, write_part,
+    Column, Table, column_bool, column_f64, column_i64, column_str, has_part, read, read_part,
+    write, write_part,
 };
-use crate::io::provenance::write_config;
-use crate::io::rundir::write_atomic;
+use crate::io::provenance::{self, CONFIG_FILE, write_config};
+use crate::io::rundir::{read_json, write_atomic};
 use crate::ops::{Op, Problem, Work};
 use crate::rng::{Stream, label_hash};
-use crate::timing::cycles;
+use crate::timing::cycles::{self, FREQUENCY_DRIFT, FrequencyWatch};
 use crate::timing::machine;
-use crate::timing::pin;
+use crate::timing::session::{CoreRoles, TimedSession};
 use crate::timing::tsc::{self, Clock};
-use crate::tour::Layout;
+use crate::tour::{Layout, Tour};
 
 /// Anchors per operator in the pilot that sizes a state.
-pub const PILOT_ANCHORS: usize = 6;
-
-/// Timed passes over the anchors per operator and round, at most (per
-/// call, batched, batched with two restores): sizes the anchor sample.
-const PASSES_PER_ROUND: f64 = 3.0;
-
-/// Length of each worker's reference loop for the core frequency (ms).
-const REFERENCE_MS: u64 = 200;
+const PILOT_ANCHORS: usize = 6;
 
 /// Settings of one measurement-A run (shared by every stage; a later stage
 /// refuses a run directory started with other settings).
@@ -155,7 +147,7 @@ impl Settings {
         Self {
             repeats: 32,
             state_seconds: Some(1.0),
-            early_max_n: Some(1000),
+            early_max_n: Some(EARLY_STATES_MAX_N),
             ..Self::full(states)
         }
     }
@@ -195,12 +187,12 @@ pub struct StateTask {
 impl StateTask {
     /// Identifier used in random streams (as in Python).
     pub fn label(&self) -> String {
-        format!("{}:s{}:{}", self.instance, self.seed, self.state.name)
+        state_label(&self.instance, self.seed, &self.state.name)
     }
 
     /// File-name key of the state's part files.
     pub fn key(&self) -> String {
-        format!("{}_s{}_{}", self.instance, self.seed, self.state.name)
+        state_key(&self.instance, self.seed, &self.state.name)
     }
 }
 
@@ -211,8 +203,8 @@ impl StateTask {
 /// # Errors
 ///
 /// If the states directory cannot be read.
-pub fn select_tasks(repository: &Path, settings: &Settings) -> anyhow::Result<Vec<StateTask>> {
-    let directory = resolve(repository, &settings.states);
+fn select_tasks(repository: &Path, settings: &Settings) -> anyhow::Result<Vec<StateTask>> {
+    let directory = repository.join(&settings.states);
     let files = read_states_directory(&directory)?;
     let mut tasks = Vec::new();
     for file in files {
@@ -263,21 +255,6 @@ pub fn select_tasks(repository: &Path, settings: &Settings) -> anyhow::Result<Ve
     Ok(tasks)
 }
 
-fn resolve(repository: &Path, path: &str) -> PathBuf {
-    let path = Path::new(path);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        repository.join(path)
-    }
-}
-
-/// The operators measured on an instance (O17/O18 need alpha candidates,
-/// which `load_instance` guarantees).
-fn operators() -> Vec<Op> {
-    Op::ALL.to_vec()
-}
-
 // ------------------------------------------------------------- 1. gains
 
 /// Exact local-optimality flags: whether some anchor improves under each
@@ -299,21 +276,48 @@ pub struct Flags {
 impl Flags {
     /// Class index into [`CLASSES`] (`aos.analysis.e1_marginal.exact_class`).
     pub fn class(&self) -> usize {
-        if self.o7 || self.o5 {
-            0
-        } else if self.oropt || self.three_opt {
-            1
-        } else if self.lk {
-            2
-        } else {
-            3
+        class_by_ladder(Op::LinKernighan, |ops| {
+            ops.iter().any(|&op| self.improves(op))
+        })
+    }
+
+    /// The flag of a ladder operator.
+    fn improves(&self, op: Op) -> bool {
+        match op {
+            Op::TwoOptNl => self.o7,
+            Op::TwoOptFirst => self.o5,
+            Op::OrOptNl => self.oropt,
+            Op::ThreeOptNl => self.three_opt,
+            Op::LinKernighan | Op::LinKernighanAlpha => self.lk,
+            other => unreachable!("{} is not on the class ladder", other.name()),
         }
     }
 }
 
+/// The class ladder: rung `k` holds the operators whose improvement
+/// somewhere puts a tour in class `k`.  The first improving rung decides;
+/// a tour no rung improves is in the last class.  `lk` is the LK step of
+/// the problem ([`Op::lin_kernighan_for`]).
+fn ladder(lk: Op) -> [Vec<Op>; CLASSES.len() - 1] {
+    [
+        vec![Op::TwoOptNl, Op::TwoOptFirst],
+        vec![Op::OrOptNl, Op::ThreeOptNl],
+        vec![lk],
+    ]
+}
+
+/// The class index of the first rung of [`ladder`] for which `improves`
+/// holds.
+fn class_by_ladder(lk: Op, mut improves: impl FnMut(&[Op]) -> bool) -> usize {
+    ladder(lk)
+        .iter()
+        .position(|ops| improves(ops))
+        .unwrap_or(CLASSES.len() - 1)
+}
+
 /// Computes [`Flags`] of a tour.
 pub fn flags<D: Dist, const C: bool, L: Layout>(
-    tour: &crate::tour::Tour<L>,
+    tour: &Tour<L>,
     problem: &Problem<'_, D, C>,
 ) -> Flags {
     let n = tour.n() as City;
@@ -336,16 +340,11 @@ pub fn flags<D: Dist, const C: bool, L: Layout>(
             delta < 0
         })
     };
-    let lk = if problem.alpha.is_some() {
-        Op::LinKernighanAlpha
-    } else {
-        Op::LinKernighan
-    };
     let o7 = improves(Op::TwoOptNl);
     let o5 = improves(Op::TwoOptFirst);
     let oropt = improves(Op::OrOptNl);
     let three_opt = improves(Op::ThreeOptNl);
-    let lk = improves(lk);
+    let lk = improves(Op::lin_kernighan_for(problem));
     Flags {
         o7,
         o5,
@@ -355,17 +354,16 @@ pub fn flags<D: Dist, const C: bool, L: Layout>(
     }
 }
 
-/// Exact class index of a tour (into [`CLASSES`]), short-circuiting: O7
-/// or O5 first, then O9 or O10, then the LK step; the same rule as
-/// [`Flags::class`].  The tour is not changed.
+/// Exact class index of a tour (into [`CLASSES`]) by the class ladder,
+/// short-circuiting at the first improving rung.  The tour is not changed.
 pub fn classify<D: Dist, const C: bool, L: Layout>(
-    tour: &crate::tour::Tour<L>,
+    tour: &Tour<L>,
     problem: &Problem<'_, D, C>,
 ) -> usize {
     let n = tour.n() as City;
     let mut rng = Stream::new(0, "flags", &[]);
     let mut scratch = tour.clone();
-    let mut improves = |ops: &[Op]| {
+    let improves = |ops: &[Op]| {
         ops.iter().any(|&op| {
             (0..n).any(|city| {
                 let mark = scratch.mark();
@@ -383,20 +381,7 @@ pub fn classify<D: Dist, const C: bool, L: Layout>(
             })
         })
     };
-    let lk = if problem.alpha.is_some() {
-        Op::LinKernighanAlpha
-    } else {
-        Op::LinKernighan
-    };
-    if improves(&[Op::TwoOptNl, Op::TwoOptFirst]) {
-        0
-    } else if improves(&[Op::OrOptNl, Op::ThreeOptNl]) {
-        1
-    } else if improves(&[lk]) {
-        2
-    } else {
-        3
-    }
+    class_by_ladder(Op::lin_kernighan_for(problem), improves)
 }
 
 /// What pass 1 stores per state besides the applications.
@@ -421,7 +406,7 @@ pub struct GainMeta {
 
 #[derive(Default)]
 struct GainRows {
-    operator: Vec<String>,
+    operator: Vec<Op>,
     anchor: Vec<u32>,
     repeat: Vec<u32>,
     gain: Vec<i64>,
@@ -436,7 +421,15 @@ struct GainRows {
 impl GainRows {
     fn into_table(self) -> Table {
         Table::new()
-            .with("operator", Column::Str(self.operator))
+            .with(
+                "operator",
+                Column::Str(
+                    self.operator
+                        .iter()
+                        .map(|op| op.name().to_string())
+                        .collect(),
+                ),
+            )
             .with("anchor", Column::U32(self.anchor))
             .with("repeat", Column::U32(self.repeat))
             .with("gain", Column::I64(self.gain))
@@ -458,7 +451,7 @@ fn application_stream(seed: u64, label: &str, op: Op, anchor: City, repeat: usiz
 /// Applies every operator at every anchor from the state tour, untimed.
 #[allow(clippy::too_many_arguments)]
 fn measure_gains<D: Dist, const C: bool, L: Layout>(
-    tour: &mut crate::tour::Tour<L>,
+    tour: &mut Tour<L>,
     problem: &Problem<'_, D, C>,
     ops: &[Op],
     anchors: &[City],
@@ -489,7 +482,7 @@ fn measure_gains<D: Dist, const C: bool, L: Layout>(
                 if tour.length() != length {
                     bail!("{label}: {} was not restored", op.name());
                 }
-                rows.operator.push(op.name().to_string());
+                rows.operator.push(op);
                 rows.anchor.push(anchor);
                 rows.repeat.push(repeat as u32);
                 rows.gain.push(-application.delta);
@@ -522,16 +515,14 @@ impl Job for GainJob<'_> {
         let settings = self.settings;
         let label = self.task.label();
         let n = instance.n();
-        let mut tour = tour_of::<L>(instance, &self.task.state.order);
+        let mut tour = Tour::<L>::new(&self.task.state.order, &instance.matrix);
         let flags = flags(&tour, problem);
-        let ops = operators();
+        let ops = Op::ALL.to_vec();
         let anchors: Vec<City> = match (&settings.anchors_from, settings.state_seconds) {
             (Some(other), _) => {
                 let path = meta_path(Path::new(other), "gains", &self.task.key());
-                let meta: GainMeta = serde_json::from_str(
-                    &std::fs::read_to_string(&path)
-                        .with_context(|| format!("{label}: reading {}", path.display()))?,
-                )?;
+                let meta: GainMeta =
+                    read_json(&path).with_context(|| format!("{label}: anchors"))?;
                 meta.anchors
             }
             (None, None) => (0..n as City).collect(),
@@ -555,8 +546,9 @@ impl Job for GainJob<'_> {
                 )?;
                 let per_anchor_ns = rows.wall_ns.iter().sum::<i64>() as f64 / pilot.len() as f64;
                 let affordable = (seconds * 1e9
-                    / (settings.min_rounds as f64 * PASSES_PER_ROUND * per_anchor_ns.max(1.0)))
-                    as usize;
+                    / (settings.min_rounds as f64
+                        * Pass::ALL.len() as f64
+                        * per_anchor_ns.max(1.0))) as usize;
                 let count = n.min(settings.min_anchors.max(affordable));
                 if count >= n {
                     (0..n as City).collect()
@@ -586,10 +578,7 @@ impl Job for GainJob<'_> {
             .operator
             .iter()
             .zip(&rows.wall_ns)
-            .map(|(name, wall)| {
-                let op = Op::from_name(name).expect("operator names come from Op");
-                *wall as f64 / settings.gain_repeats(op) as f64
-            })
+            .map(|(&op, wall)| *wall as f64 / settings.gain_repeats(op) as f64)
             .sum();
         let meta = GainMeta {
             round_ns_estimate,
@@ -604,28 +593,11 @@ impl Job for GainJob<'_> {
     }
 }
 
-/// Instances loaded once per thread (tasks come grouped by instance).
-struct InstanceCache {
-    cached: Option<(String, std::sync::Arc<Instance>)>,
-}
-
-impl InstanceCache {
-    fn get(&mut self, repository: &Path, path: &str) -> anyhow::Result<std::sync::Arc<Instance>> {
-        if let Some((cached_path, instance)) = &self.cached
-            && cached_path == path
-        {
-            return Ok(instance.clone());
-        }
-        self.cached = None;
-        let instance = std::sync::Arc::new(load_instance(repository, path)?);
-        self.cached = Some((path.to_string(), instance.clone()));
-        Ok(instance)
-    }
-}
-
 thread_local! {
+    /// The instance of the state a thread works on (tasks come grouped by
+    /// instance).
     static INSTANCES: std::cell::RefCell<InstanceCache> =
-        const { std::cell::RefCell::new(InstanceCache { cached: None }) };
+        const { std::cell::RefCell::new(InstanceCache::new()) };
 }
 
 fn instance_for(repository: &Path, path: &str) -> anyhow::Result<std::sync::Arc<Instance>> {
@@ -643,7 +615,7 @@ fn meta_path(directory: &Path, kind: &str, key: &str) -> PathBuf {
 /// # Errors
 ///
 /// If a state fails (the error names it).
-pub fn run_gains(
+fn run_gains(
     repository: &Path,
     directory: &Path,
     settings: &Settings,
@@ -712,24 +684,19 @@ impl Expected {
 }
 
 fn read_expected(directory: &Path, key: &str) -> anyhow::Result<Expected> {
-    let batch = read(&parts_directory(directory, "gains").join(format!("{key}.parquet")))?;
-    let operator = column_str(&batch, "operator")?;
-    let anchor = column_i64(&batch, "anchor")?;
-    let repeat = column_i64(&batch, "repeat")?;
-    let gain = column_i64(&batch, "gain")?;
-    let hash = column_i64(&batch, "tour_hash")?;
-    let mut by_application = HashMap::with_capacity(operator.len());
+    let records = read_gains(directory, key)?;
+    let mut by_application = HashMap::with_capacity(records.len());
     let mut anchors: Vec<City> = Vec::new();
-    for index in 0..operator.len() {
+    for record in records {
         // Gains written before 2026-11-05 still hold the retired operators.
-        let Some(op) = Op::parse_stored(&operator[index])? else {
+        let Some(op) = Op::parse_stored(&record.operator)? else {
             continue;
         };
         by_application.insert(
-            (op, anchor[index] as City, repeat[index] as u32),
-            (gain[index], hash[index]),
+            (op, record.anchor, record.repeat),
+            (record.gain, record.tour_hash),
         );
-        anchors.push(anchor[index] as City);
+        anchors.push(record.anchor);
     }
     anchors.sort_unstable();
     anchors.dedup();
@@ -876,7 +843,7 @@ impl OperatorRound<'_> {
     /// gain and tour hash.
     fn per_call<D: Dist, const C: bool, L: Layout>(
         &self,
-        tour: &mut crate::tour::Tour<L>,
+        tour: &mut Tour<L>,
         problem: &Problem<'_, D, C>,
         round: usize,
         rows: &mut TimeRows,
@@ -920,7 +887,7 @@ impl OperatorRound<'_> {
     /// streams are built and the gains checked outside the region.
     fn batch<D: Dist, const C: bool, L: Layout>(
         &self,
-        tour: &mut crate::tour::Tour<L>,
+        tour: &mut Tour<L>,
         problem: &Problem<'_, D, C>,
     ) -> anyhow::Result<Sample> {
         let length = tour.length();
@@ -951,7 +918,7 @@ impl OperatorRound<'_> {
     /// the region's median sample.
     fn restores<D: Dist, const C: bool, L: Layout>(
         &self,
-        tour: &mut crate::tour::Tour<L>,
+        tour: &mut Tour<L>,
         problem: &Problem<'_, D, C>,
     ) -> anyhow::Result<Sample> {
         let improving: Vec<City> = self
@@ -1011,9 +978,9 @@ impl Job for TimeJob<'_> {
     ) -> anyhow::Result<Self::Output> {
         let settings = self.settings;
         let label = self.task.label();
-        let mut tour = tour_of::<L>(instance, &self.task.state.order);
-        crate::timing::disturb::spin_up(crate::timing::disturb::SPIN_UP_MS);
-        let mut ops = operators();
+        let mut tour = Tour::<L>::new(&self.task.state.order, &instance.matrix);
+        crate::timing::disturb::spin_up();
+        let mut ops = Op::ALL.to_vec();
         let judged: Vec<Op> = ops
             .iter()
             .copied()
@@ -1112,7 +1079,7 @@ impl Job for TimeJob<'_> {
 /// If a state has no pass-1 result, a replay disagrees with pass 1, the
 /// machine is not locked (without `allow_unlocked`), or too few cores
 /// exist.
-pub fn run_times(
+fn run_times(
     repository: &Path,
     directory: &Path,
     settings: &Settings,
@@ -1129,28 +1096,19 @@ pub fn run_times(
             missing.label()
         );
     }
-    let cores = pin::physical_cores()?;
-    if workers + 1 > cores.len() {
-        bail!(
-            "{workers} timed workers need {} physical cores, found {}",
-            workers + 1,
-            cores.len()
-        );
-    }
-    let problems = machine::require_locked(&cores, allow_unlocked)?;
-    pin::pin_current_thread(*cores.last().expect("cores exist"))?;
-    let clock = Clock::calibrate(5, 200)?;
+    let session = TimedSession::open(CoreRoles::workers(workers)?, allow_unlocked)?;
+    let clock = &session.clock;
     let todo: Vec<&StateTask> = tasks
         .iter()
         .filter(|task| !has_part(directory, "timings", &task.key()))
         .collect();
     let stage = json!({
         "started": crate::io::rundir::timestamp(),
-        "machine_problems": problems,
+        "machine_problems": session.problems,
         "clock": clock,
         "timed_workers": workers,
-        "cores": &cores[..workers],
-        "main_core": cores.last(),
+        "cores": session.roles.timed,
+        "main_core": session.roles.main,
         "states_to_do": todo.len(),
     });
     let stage_file = directory.join(format!("times-{}.json", crate::io::rundir::timestamp()));
@@ -1164,126 +1122,82 @@ pub fn run_times(
         tasks.len() - todo.len()
     );
     std::fs::create_dir_all(directory.join("timings.meta"))?;
-    let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
-    let errors: Mutex<Vec<anyhow::Error>> = Mutex::new(Vec::new());
     let started = std::time::Instant::now();
-    std::thread::scope(|scope| {
-        for &cpu in &cores[..workers] {
-            let (todo, next, done, errors, clock) = (&todo, &next, &done, &errors, &clock);
-            scope.spawn(move || {
-                let result = (|| -> anyhow::Result<()> {
-                    pin::pin_current_thread(cpu)?;
-                    // Opened on this thread: they count this thread only.
-                    let mut counters = if allow_unlocked {
-                        cycles::ThreadCounters::open()
-                            .inspect_err(|error| {
-                                log::warn!("cpu {cpu}: no core-cycle counter: {error:#}");
-                            })
-                            .ok()
-                    } else {
-                        Some(cycles::ThreadCounters::open()?)
-                    };
-                    let reference_khz = match counters.as_mut() {
-                        Some(counters) => Some(counters.reference_khz(REFERENCE_MS)?),
-                        None => None,
-                    };
-                    loop {
-                        if !errors.lock().expect("lock").is_empty() {
-                            return Ok(());
-                        }
-                        let index = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(task) = todo.get(index) else {
-                            return Ok(());
-                        };
-                        let key = task.key();
-                        let expected = read_expected(directory, &key)?;
-                        let instance = instance_for(repository, &task.path)?;
-                        let khz_before = machine::average_khz(cpu).map(|value| value as f64);
-                        let reading_before = match counters.as_mut() {
-                            Some(counters) => Some(counters.read()?),
-                            None => None,
-                        };
-                        let state_started = std::time::Instant::now();
-                        let (rows, batches, rounds, reason) = dispatch(
-                            TimeJob {
-                                task,
-                                settings,
-                                expected: &expected,
-                                clock,
-                            },
-                            &instance,
-                            &settings.implementation,
-                        )
-                        .with_context(|| task.label())?;
-                        let seconds = state_started.elapsed().as_secs_f64();
-                        let core_khz = match (counters.as_mut(), reading_before) {
-                            (Some(counters), Some(before)) => counters.read()?.khz_since(&before),
-                            _ => None,
-                        };
-                        let khz_after = machine::average_khz(cpu).map(|value| value as f64);
-                        let tolerance = super::e0::FREQUENCY_DRIFT;
-                        let meta = TimingMeta {
-                            rounds,
-                            stop_reason: reason,
-                            seconds,
-                            cpu,
-                            khz_before,
-                            khz_after,
-                            core_khz,
-                            reference_khz,
-                            suspect: cycles::drifted(khz_before, khz_after, tolerance)
-                                || cycles::drifted(reference_khz, core_khz, tolerance),
-                            overhead_ns: clock.overhead_ns(),
-                            step_ns: clock.ns(clock.step_ticks),
-                        };
-                        if meta.suspect {
-                            log::warn!(
-                                "{}: core frequency drifted (snapshots {khz_before:?} -> {khz_after:?} kHz, average {core_khz:?} against reference {reference_khz:?} kHz); timings flagged as suspect",
-                                task.label()
-                            );
-                        }
-                        write_atomic(
-                            &meta_path(directory, "timings", &key),
-                            serde_json::to_string(&meta)?.as_bytes(),
-                        )?;
-                        // Batches before timings: the timings part marks the state done.
-                        write_part(directory, "batches", &key, batches.into_table())?;
-                        write_part(
-                            directory,
-                            "timings",
-                            &key,
-                            Table::new()
-                                .with("operator", Column::Str(rows.operator))
-                                .with("anchor", Column::U32(rows.anchor))
-                                .with("round", Column::U32(rows.round))
-                                .with("repeat", Column::U32(rows.repeat))
-                                .with("time_ns", Column::F64(rows.time_ns)),
-                        )?;
-                        let count = done.fetch_add(1, Ordering::Relaxed) + 1;
-                        if count.is_multiple_of(100) || count == todo.len() {
-                            log::info!(
-                                "times progress: {count}/{} states, {:.0} s",
-                                todo.len(),
-                                started.elapsed().as_secs_f64()
-                            );
-                        }
-                    }
-                })();
-                if let Err(error) = result {
-                    errors.lock().expect("lock").push(error);
-                }
-            });
-        }
-    });
-    if let Some(error) = errors
-        .into_inner()
-        .expect("workers finished")
-        .into_iter()
-        .next()
-    {
-        return Err(error);
-    }
+    session.run_pinned(
+        &todo,
+        // Opened on the worker's thread: they count that thread only.
+        |_| FrequencyWatch::on_this_thread(allow_unlocked),
+        |frequency, cpu, task| {
+            let key = task.key();
+            let expected = read_expected(directory, &key)?;
+            let instance = instance_for(repository, &task.path)?;
+            let khz_before = machine::average_khz_f64(cpu);
+            let reading_before = frequency.read()?;
+            let state_started = std::time::Instant::now();
+            let (rows, batches, rounds, reason) = dispatch(
+                TimeJob {
+                    task,
+                    settings,
+                    expected: &expected,
+                    clock,
+                },
+                &instance,
+                &settings.implementation,
+            )
+            .with_context(|| task.label())?;
+            let seconds = state_started.elapsed().as_secs_f64();
+            let core_khz = frequency.khz_since(reading_before)?;
+            let khz_after = machine::average_khz_f64(cpu);
+            let meta = TimingMeta {
+                rounds,
+                stop_reason: reason,
+                seconds,
+                cpu,
+                khz_before,
+                khz_after,
+                core_khz,
+                reference_khz: frequency.reference_khz,
+                suspect: cycles::drifted(khz_before, khz_after, FREQUENCY_DRIFT)
+                    || cycles::drifted(frequency.reference_khz, core_khz, FREQUENCY_DRIFT),
+                overhead_ns: clock.overhead_ns(),
+                step_ns: clock.ns(clock.step_ticks),
+            };
+            if meta.suspect {
+                log::warn!(
+                    "{}: core frequency drifted (snapshots {khz_before:?} -> {khz_after:?} kHz, average {core_khz:?} against reference {:?} kHz); timings flagged as suspect",
+                    task.label(),
+                    frequency.reference_khz
+                );
+            }
+            write_atomic(
+                &meta_path(directory, "timings", &key),
+                serde_json::to_string(&meta)?.as_bytes(),
+            )?;
+            // Batches before timings: the timings part marks the state done.
+            write_part(directory, "batches", &key, batches.into_table())?;
+            write_part(
+                directory,
+                "timings",
+                &key,
+                Table::new()
+                    .with("operator", Column::Str(rows.operator))
+                    .with("anchor", Column::U32(rows.anchor))
+                    .with("round", Column::U32(rows.round))
+                    .with("repeat", Column::U32(rows.repeat))
+                    .with("time_ns", Column::F64(rows.time_ns)),
+            )?;
+            let count = done.fetch_add(1, Ordering::Relaxed) + 1;
+            if count.is_multiple_of(100) || count == todo.len() {
+                log::info!(
+                    "times progress: {count}/{} states, {:.0} s",
+                    todo.len(),
+                    started.elapsed().as_secs_f64()
+                );
+            }
+            Ok(())
+        },
+    )?;
     Ok(())
 }
 
@@ -1382,7 +1296,7 @@ impl Grid {
 /// # Errors
 ///
 /// If the passes cover different anchors or the mean time is not positive.
-pub fn summarise_operator(
+fn summarise_operator(
     anchors: &[City],
     gains: &[(City, u32, f64)],
     times: &[(City, u32, f64)],
@@ -1464,8 +1378,6 @@ fn operator_times_from(
     batches: &arrow::record_batch::RecordBatch,
     times: &arrow::record_batch::RecordBatch,
 ) -> anyhow::Result<HashMap<String, OperatorTime>> {
-    // Per operator, every round's time per application and restore per
-    // application.
     let mut batched: HashMap<String, (Vec<f64>, Vec<f64>)> = HashMap::new();
     for (((op, time), restore), applications) in column_str(batches, "operator")?
         .into_iter()
@@ -1520,9 +1432,10 @@ fn read_timing_parts(
     if !has_part(directory, "batches", key) {
         bail!("{key} was timed without batched passes (an older run); run its times stage again");
     }
-    let batches = read(&parts_directory(directory, "batches").join(format!("{key}.parquet")))?;
-    let times = read(&parts_directory(directory, "timings").join(format!("{key}.parquet")))?;
-    Ok((batches, times))
+    Ok((
+        read_part(directory, "batches", key)?,
+        read_part(directory, "timings", key)?,
+    ))
 }
 
 /// Both passes' times of every operator in the state `key` of a
@@ -1633,38 +1546,25 @@ fn summarise_state(
     optimum: Option<f64>,
 ) -> anyhow::Result<(CellRows, Table)> {
     let key = task.key();
-    let meta: GainMeta = serde_json::from_str(&std::fs::read_to_string(meta_path(
-        directory, "gains", &key,
-    ))?)?;
-    let timing: TimingMeta = serde_json::from_str(&std::fs::read_to_string(meta_path(
-        directory, "timings", &key,
-    ))?)?;
-    let gains = read(&parts_directory(directory, "gains").join(format!("{key}.parquet")))?;
+    let meta: GainMeta = read_json(&meta_path(directory, "gains", &key))?;
+    let timing: TimingMeta = read_json(&meta_path(directory, "timings", &key))?;
     let (batches, times) = read_timing_parts(directory, &key)?;
     let operator_times = operator_times_from(&key, &batches, &times)?;
     let mut gain_entries: HashMap<String, Vec<(City, u32, f64)>> = HashMap::new();
-    for (((op, anchor), repeat), gain) in column_str(&gains, "operator")?
-        .into_iter()
-        .zip(column_i64(&gains, "anchor")?)
-        .zip(column_i64(&gains, "repeat")?)
-        .zip(column_i64(&gains, "gain")?)
-    {
-        gain_entries
-            .entry(op)
-            .or_default()
-            .push((anchor as City, repeat as u32, gain as f64));
+    for record in read_gains(directory, &key)? {
+        gain_entries.entry(record.operator).or_default().push((
+            record.anchor,
+            record.repeat,
+            record.gain as f64,
+        ));
     }
     let mut time_entries: HashMap<String, Vec<(City, u32, f64)>> = HashMap::new();
-    for (((op, anchor), round), time) in column_str(&times, "operator")?
-        .into_iter()
-        .zip(column_i64(&times, "anchor")?)
-        .zip(column_i64(&times, "round")?)
-        .zip(column_f64(&times, "time_ns")?)
-    {
-        time_entries
-            .entry(op)
-            .or_default()
-            .push((anchor as City, round as u32, time));
+    for record in timing_records(&times)? {
+        time_entries.entry(record.operator).or_default().push((
+            record.anchor,
+            record.round,
+            record.time_ns,
+        ));
     }
     let class = CLASSES[meta.flags.class()];
     let mut cells = CellRows::default();
@@ -1673,7 +1573,7 @@ fn summarise_state(
     let mut node_gain = Vec::new();
     let mut node_time = Vec::new();
     let mut node_per_call = Vec::new();
-    for op in operators() {
+    for op in Op::ALL {
         let gains = gain_entries
             .get(op.name())
             .with_context(|| format!("{key}: no gains of {}", op.name()))?;
@@ -1801,6 +1701,7 @@ fn leaders_table(cells: &CellRows) -> Table {
     let mut leader_per_application = Vec::new();
     let mut o7_optimal_o5_improves = Vec::new();
     for (name, state_seed, state_name, rows) in groups {
+        // Rows are in protocol order, so the sort is [`rank_by_rate`]'s.
         let mut ranked = rows.clone();
         ranked.sort_by(|&a, &b| cells.rate[b].total_cmp(&cells.rate[a]).then(a.cmp(&b)));
         let (top, second) = (ranked[0], ranked[1]);
@@ -1904,7 +1805,7 @@ fn operator_time_table(cells: &CellRows) -> Table {
 /// # Errors
 ///
 /// If a state lacks a pass, or a summary fails.
-pub fn run_summarise(
+fn run_summarise(
     directory: &Path,
     settings: &Settings,
     tasks: &[StateTask],
@@ -1977,7 +1878,7 @@ pub fn run_summarise(
         );
     }
     let leaders = leaders_table(&cells);
-    let states = cells.instance.len() / operators().len();
+    let states = cells.instance.len() / Op::ALL.len();
     write(&directory.join("leaders.parquet"), leaders)?;
     write(
         &directory.join("operator_times.parquet"),
@@ -2020,12 +1921,9 @@ pub fn run(
     allow_unlocked: bool,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(directory)?;
-    let config = directory.join("config.json");
-    if config.is_file() {
-        let previous: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&config)?)?;
-        let previous: Settings =
-            serde_json::from_value(previous["settings"]["measurement"].clone())
-                .context("config.json of this run has no readable settings")?;
+    if directory.join(CONFIG_FILE).is_file() {
+        let previous =
+            read_settings(directory).context("config.json of this run has no readable settings")?;
         if &previous != settings {
             bail!(
                 "{} was started with other settings; every stage must use the same ones (see its config.json)",
@@ -2044,11 +1942,7 @@ pub fn run(
     }
     let tasks = select_tasks(repository, settings)?;
     log::info!("{} states selected", tasks.len());
-    let workers = if gain_workers == 0 {
-        all_cpus()
-    } else {
-        gain_workers
-    };
+    let workers = untimed_workers(gain_workers);
     if matches!(stage, Stage::Gains | Stage::All) {
         run_gains(repository, directory, settings, &tasks, workers)?;
     }
@@ -2063,7 +1957,7 @@ pub fn run(
         )?;
     }
     if matches!(stage, Stage::Summarise | Stage::All) {
-        let files = read_states_directory(&resolve(repository, &settings.states))?;
+        let files = read_states_directory(&repository.join(&settings.states))?;
         let optima: HashMap<String, Option<f64>> = files
             .iter()
             .map(|file| {
@@ -2080,45 +1974,276 @@ pub fn run(
     Ok(())
 }
 
+// ------------------------------------------------------------- the files
+//
+// The tables of a measurement run and their readers.  Later experiments
+// (E1R, population runs, comparisons) read a run only through these.
+
+/// The part key of a state: `<instance>_s<seed>_<state>`.
+pub fn state_key(instance: &str, seed: u64, state: &str) -> String {
+    format!("{instance}_s{seed}_{state}")
+}
+
+/// The label of a state in random streams: `<instance>:s<seed>:<state>`
+/// (as in Python).
+pub fn state_label(instance: &str, seed: u64, state: &str) -> String {
+    format!("{instance}:s{seed}:{state}")
+}
+
+/// The settings a measurement run in `directory` was made with.
+///
+/// # Errors
+///
+/// If its `config.json` is missing or does not hold them.
+pub fn read_settings(directory: &Path) -> anyhow::Result<Settings> {
+    provenance::read_settings(directory, "measurement")
+}
+
+/// One pass-1 application of a `gains` part, operator by stored name
+/// (runs made before 2026-11-05 also hold the retired operators).
+#[derive(Debug, Clone)]
+pub struct GainRecord {
+    /// Operator name.
+    pub operator: String,
+    /// Anchor city.
+    pub anchor: City,
+    /// Repeat of a random operator (0 for the deterministic ones).
+    pub repeat: u32,
+    /// Length change.
+    pub gain: i64,
+    /// Work counted.
+    pub work: Work,
+    /// Hash of the tour after the application.
+    pub tour_hash: i64,
+}
+
+/// The pass-1 applications of state `key`.
+///
+/// # Errors
+///
+/// If the part is missing or lacks a column.
+pub fn read_gains(directory: &Path, key: &str) -> anyhow::Result<Vec<GainRecord>> {
+    let batch = read_part(directory, "gains", key)?;
+    let (operator, anchor, repeat, gain, hash) = (
+        column_str(&batch, "operator")?,
+        column_i64(&batch, "anchor")?,
+        column_i64(&batch, "repeat")?,
+        column_i64(&batch, "gain")?,
+        column_i64(&batch, "tour_hash")?,
+    );
+    let (matrix, cache, positions, flips) = (
+        column_i64(&batch, "matrix_reads")?,
+        column_i64(&batch, "cache_reads")?,
+        column_i64(&batch, "positions")?,
+        column_i64(&batch, "flips")?,
+    );
+    Ok(operator
+        .into_iter()
+        .enumerate()
+        .map(|(row, operator)| GainRecord {
+            operator,
+            anchor: anchor[row] as City,
+            repeat: repeat[row] as u32,
+            gain: gain[row],
+            work: Work {
+                matrix_reads: matrix[row] as u64,
+                cache_reads: cache[row] as u64,
+                positions: positions[row] as u64,
+                flips: flips[row] as u64,
+            },
+            tour_hash: hash[row],
+        })
+        .collect())
+}
+
+/// One per-call timing of a `timings` part.
+#[derive(Debug, Clone)]
+pub struct TimeRecord {
+    /// Operator name.
+    pub operator: String,
+    /// Anchor city.
+    pub anchor: City,
+    /// Timed round.
+    pub round: u32,
+    /// Repeat of a random operator.
+    pub repeat: u32,
+    /// Time of the application, ns.
+    pub time_ns: f64,
+}
+
+fn timing_records(batch: &arrow::record_batch::RecordBatch) -> anyhow::Result<Vec<TimeRecord>> {
+    let (operator, anchor, round, repeat, time) = (
+        column_str(batch, "operator")?,
+        column_i64(batch, "anchor")?,
+        column_i64(batch, "round")?,
+        column_i64(batch, "repeat")?,
+        column_f64(batch, "time_ns")?,
+    );
+    Ok(operator
+        .into_iter()
+        .enumerate()
+        .map(|(row, operator)| TimeRecord {
+            operator,
+            anchor: anchor[row] as City,
+            round: round[row] as u32,
+            repeat: repeat[row] as u32,
+            time_ns: time[row],
+        })
+        .collect())
+}
+
+/// The per-call timings of state `key`.
+///
+/// # Errors
+///
+/// If the part is missing or lacks a column.
+pub fn read_timings(directory: &Path, key: &str) -> anyhow::Result<Vec<TimeRecord>> {
+    timing_records(&read_part(directory, "timings", key)?)
+}
+
+/// One (state, operator) row of a `cells` table.
+#[derive(Debug, Clone)]
+pub struct CellRecord {
+    /// Instance name.
+    pub instance: String,
+    /// State seed.
+    pub seed: u32,
+    /// State name.
+    pub state: String,
+    /// Exact class label of the state.
+    pub class: String,
+    /// Operator name.
+    pub operator: String,
+    /// Marginal rate.
+    pub rate: f64,
+}
+
+/// Every row of a `cells` table.
+///
+/// # Errors
+///
+/// If the table cannot be read or lacks a column.
+pub fn read_cells(cells: &Path) -> anyhow::Result<Vec<CellRecord>> {
+    let batch = read(cells)?;
+    let (instance, seed, state) = (
+        column_str(&batch, "instance")?,
+        column_i64(&batch, "seed")?,
+        column_str(&batch, "state")?,
+    );
+    let (class, operator, rate) = (
+        column_str(&batch, "class")?,
+        column_str(&batch, "operator")?,
+        column_f64(&batch, "rate")?,
+    );
+    Ok(instance
+        .into_iter()
+        .zip(state)
+        .zip(class.into_iter().zip(operator))
+        .enumerate()
+        .map(|(row, ((instance, state), (class, operator)))| CellRecord {
+            instance,
+            seed: seed[row] as u32,
+            state,
+            class,
+            operator,
+            rate: rate[row],
+        })
+        .collect())
+}
+
 /// Rates per (instance, seed, state), by operator name.
 pub type RateMap = HashMap<(String, u32, String), HashMap<String, f64>>;
 
-/// Reads a cells table's (instance, seed, state, operator) → rate map, for
-/// later experiments.
+/// A cells table's (instance, seed, state) → operator → rate map.
 ///
 /// # Errors
 ///
 /// If the table cannot be read.
 pub fn read_rates(cells: &Path) -> anyhow::Result<RateMap> {
-    let batch = read(cells)?;
     let mut rates: RateMap = HashMap::new();
-    for (((instance, seed), state), (operator, rate)) in column_str(&batch, "instance")?
-        .into_iter()
-        .zip(column_i64(&batch, "seed")?)
-        .zip(column_str(&batch, "state")?)
-        .zip(
-            column_str(&batch, "operator")?
-                .into_iter()
-                .zip(column_f64(&batch, "rate")?),
-        )
-    {
+    for cell in read_cells(cells)? {
         rates
-            .entry((instance, seed as u32, state))
+            .entry((cell.instance, cell.seed, cell.state))
             .or_default()
-            .insert(operator, rate);
+            .insert(cell.operator, cell.rate);
     }
     Ok(rates)
 }
 
-/// Whether a table column holds `true` for a row (re-export for callers
-/// that read leaders tables).
+/// The operators of one state from the best rate down; equal rates go to
+/// the lower protocol number (the rule of the `leaders` table), names
+/// that are not current operators come last.
+pub fn rank_by_rate(rates: &HashMap<String, f64>) -> Vec<(&str, f64)> {
+    let order = |name: &str| Op::from_name(name).map_or(usize::MAX, Op::index);
+    let mut ranked: Vec<(&str, f64)> = rates
+        .iter()
+        .map(|(name, &rate)| (name.as_str(), rate))
+        .collect();
+    ranked.sort_by(|a, b| {
+        b.1.total_cmp(&a.1)
+            .then(order(a.0).cmp(&order(b.0)))
+            .then(a.0.cmp(b.0))
+    });
+    ranked
+}
+
+/// One state of a `leaders` table.
+#[derive(Debug, Clone)]
+pub struct LeaderRecord {
+    /// Instance name.
+    pub instance: String,
+    /// Instance family.
+    pub family: String,
+    /// Number of cities.
+    pub n: usize,
+    /// State seed.
+    pub seed: u64,
+    /// State name.
+    pub state: String,
+    /// Exact class label.
+    pub class: String,
+    /// The operator with the best rate.
+    pub leader: String,
+    /// Whether the leader's rate is positive.
+    pub any_improvement: bool,
+}
+
+/// Every state of a `leaders` table.
 ///
 /// # Errors
 ///
-/// If the column is missing.
-pub fn read_bool(
-    batch: &arrow::record_batch::RecordBatch,
-    name: &str,
-) -> anyhow::Result<Vec<bool>> {
-    column_bool(batch, name)
+/// If the table cannot be read or lacks a column.
+pub fn read_leaders(path: &Path) -> anyhow::Result<Vec<LeaderRecord>> {
+    let batch = read(path)?;
+    let (instance, family, n, seed) = (
+        column_str(&batch, "instance")?,
+        column_str(&batch, "family")?,
+        column_i64(&batch, "n")?,
+        column_i64(&batch, "seed")?,
+    );
+    let (state, class, leader, any) = (
+        column_str(&batch, "state")?,
+        column_str(&batch, "class")?,
+        column_str(&batch, "leader")?,
+        column_bool(&batch, "any_improvement")?,
+    );
+    Ok(instance
+        .into_iter()
+        .zip(family)
+        .zip(state.into_iter().zip(class))
+        .zip(leader)
+        .enumerate()
+        .map(
+            |(row, (((instance, family), (state, class)), leader))| LeaderRecord {
+                instance,
+                family,
+                n: n[row] as usize,
+                seed: seed[row] as u64,
+                state,
+                class,
+                leader,
+                any_improvement: any[row],
+            },
+        )
+        .collect())
 }

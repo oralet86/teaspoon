@@ -8,10 +8,10 @@
 /// gr96/gr202/gr431/gr666/ali535 distances change by one (checked
 /// 2026-10-31, `ideas/rust-port.md` §4.1).
 #[allow(clippy::approx_constant)] // The truncation is the point.
-pub const TSPLIB_PI: f64 = 3.141592;
+const TSPLIB_PI: f64 = 3.141592;
 
 /// Earth radius of the TSPLIB `GEO` definition, in kilometres.
-pub const GEO_RADIUS_KM: f64 = 6378.388;
+const GEO_RADIUS_KM: f64 = 6378.388;
 
 /// The TSPLIB `nint`: round half up.
 fn nint(value: f64) -> f64 {

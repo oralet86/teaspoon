@@ -32,7 +32,7 @@
 //! `arms.parquet`, `states.parquet`, `summary.parquet`, `summary.md`).
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, bail};
@@ -40,26 +40,25 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::common::{
-    CLASSES, Implementation, Job, STATE_NAMES, all_cpus, dispatch, load_instance, parallel_map,
-    read_states_directory, state_rank, tour_of,
+    CLASSES, Implementation, InstanceCache, Job, dispatch, load_instance, parallel_map,
+    read_states_directory, untimed_workers,
 };
-use super::marginal::{self, classify};
+use super::marginal::{self, LeaderRecord, classify};
+use super::states::{STATE_NAMES, state_rank};
 use super::{mean, median, quantile, standard_deviation};
 use crate::City;
 use crate::instance::Instance;
 use crate::instance::storage::Dist;
 use crate::io::parquet::{
-    Column, Table, column_bool, column_f64, column_i64, column_str, has_part, parts_directory,
-    read, write, write_part,
+    Column, Table, column_f64, column_i64, has_part, read_part, write, write_part,
 };
-use crate::io::provenance::write_config;
-use crate::io::rundir::write_atomic;
+use crate::io::provenance::{read_settings, write_config};
+use crate::io::rundir::{read_json, write_atomic};
 use crate::ops::{Op, Problem, Work};
 use crate::rng::{Stream, label_hash};
-use crate::timing::machine;
-use crate::timing::pin;
+use crate::timing::session::{CoreRoles, TimedSession};
 use crate::timing::tsc::{self, Clock};
-use crate::tour::Layout;
+use crate::tour::{Layout, Tour};
 
 /// Size groups of the E1 instance set; an instance belongs to the nearest.
 const SIZES: [usize; 3] = [100, 200, 500];
@@ -71,6 +70,18 @@ const FLIPS: usize = 10_000;
 const MIN_REPEATS: usize = 8;
 /// Family-wise error per state and horizon (Bonferroni over alternatives).
 const ALPHA: f64 = 0.05;
+
+/// State seeds whose timings fit the provisional clock at `plan`.
+pub const FIT_SEEDS: [u64; 3] = [0, 1, 2];
+
+/// State seed on which the provisional fit is checked.
+pub const CHECK_SEED: u64 = 3;
+
+/// Seed of the plan's draws and the rollouts' streams.
+pub const PLAN_SEED: u64 = 0;
+
+/// Rollouts `validate` replays with real timing unless told otherwise.
+pub const VALIDATE_ROLLOUTS: usize = 24;
 
 /// The continuation policy's behaviour when its operator gains nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
@@ -337,7 +348,7 @@ impl Policy {
     /// so an unchanged length means an unchanged tour).
     fn choose<D: Dist, const C: bool, L: Layout>(
         &mut self,
-        tour: &crate::tour::Tour<L>,
+        tour: &Tour<L>,
         problem: &Problem<'_, D, C>,
         last_gain: i64,
     ) -> (Op, usize) {
@@ -409,9 +420,9 @@ impl Job for Rollout<'_> {
         if self.slice_ns <= 0.0 || self.horizon_ns < self.slice_ns {
             bail!("need 0 < slice <= horizon");
         }
-        let mut tour = tour_of::<L>(instance, self.order);
+        let mut tour = Tour::<L>::new(self.order, &instance.matrix);
         if self.clock.is_some() {
-            crate::timing::disturb::spin_up(crate::timing::disturb::SPIN_UP_MS);
+            crate::timing::disturb::spin_up();
         }
         let mut policy = Policy::new(self.ranking.to_vec(), self.stall);
         let mut result = RolloutResult::default();
@@ -506,7 +517,7 @@ impl Job for Rollout<'_> {
 
 /// The tour length at virtual time `at_ns`: after the last improvement at
 /// or before it, else `initial`.
-pub fn length_at(initial: i64, event_ns: &[f64], event_length: &[i64], at_ns: f64) -> i64 {
+fn length_at(initial: i64, event_ns: &[f64], event_length: &[i64], at_ns: f64) -> i64 {
     let index = event_ns.partition_point(|&time| time <= at_ns);
     if index == 0 {
         initial
@@ -580,41 +591,6 @@ fn size_group(n: usize) -> usize {
         .expect("sizes exist")
 }
 
-struct LeaderRow {
-    instance: String,
-    family: String,
-    n: usize,
-    seed: u64,
-    state: String,
-    class: String,
-    leader: String,
-    any_improvement: bool,
-}
-
-fn read_leaders(path: &Path) -> anyhow::Result<Vec<LeaderRow>> {
-    let batch = read(path)?;
-    let instance = column_str(&batch, "instance")?;
-    let family = column_str(&batch, "family")?;
-    let n = column_i64(&batch, "n")?;
-    let seed = column_i64(&batch, "seed")?;
-    let state = column_str(&batch, "state")?;
-    let class = column_str(&batch, "class")?;
-    let leader = column_str(&batch, "leader")?;
-    let any = column_bool(&batch, "any_improvement")?;
-    Ok((0..instance.len())
-        .map(|row| LeaderRow {
-            instance: instance[row].clone(),
-            family: family[row].clone(),
-            n: n[row] as usize,
-            seed: seed[row] as u64,
-            state: state[row].clone(),
-            class: class[row].clone(),
-            leader: leader[row].clone(),
-            any_improvement: any[row],
-        })
-        .collect())
-}
-
 /// Drops the retired operators from a measurement made before their
 /// retirement (2026-11-05): their rates go, and a state they led gets the
 /// best-rated current operator as its leader (ties to the lower protocol
@@ -625,9 +601,9 @@ fn read_leaders(path: &Path) -> anyhow::Result<Vec<LeaderRow>> {
 /// If a table names an operator that is neither current nor retired, or a
 /// state led by a retired operator has no rates.
 fn without_retired(
-    mut leaders: Vec<LeaderRow>,
+    mut leaders: Vec<LeaderRecord>,
     mut rates: marginal::RateMap,
-) -> anyhow::Result<(Vec<LeaderRow>, marginal::RateMap)> {
+) -> anyhow::Result<(Vec<LeaderRecord>, marginal::RateMap)> {
     for state_rates in rates.values_mut() {
         let mut kept = HashMap::with_capacity(state_rates.len());
         for (name, rate) in state_rates.drain() {
@@ -674,23 +650,23 @@ fn without_retired(
 }
 
 /// A filter of leader rows.
-type Scope<'a> = Box<dyn Fn(&LeaderRow) -> bool + 'a>;
+type Scope<'a> = Box<dyn Fn(&LeaderRecord) -> bool + 'a>;
 
 /// Per class, the operators ranked by how many improving states of that
 /// class they lead, in the narrowest scope that has any: the instance,
 /// its (family, size) cell, its family, everything.  Ties go to the lower
 /// operator number.
-fn rankings(leaders: &[LeaderRow], instance: &str) -> anyhow::Result<Vec<Vec<String>>> {
+fn rankings(leaders: &[LeaderRecord], instance: &str) -> anyhow::Result<Vec<Vec<String>>> {
     let own = leaders
         .iter()
         .find(|row| row.instance == instance)
         .context("instance not in leaders")?;
     let (family, size) = (own.family.clone(), size_group(own.n));
     let scopes: [Scope<'_>; 4] = [
-        Box::new(|row: &LeaderRow| row.instance == instance),
-        Box::new(|row: &LeaderRow| row.family == family && size_group(row.n) == size),
-        Box::new(|row: &LeaderRow| row.family == own.family),
-        Box::new(|_: &LeaderRow| true),
+        Box::new(|row: &LeaderRecord| row.instance == instance),
+        Box::new(|row: &LeaderRecord| row.family == family && size_group(row.n) == size),
+        Box::new(|row: &LeaderRecord| row.family == own.family),
+        Box::new(|_: &LeaderRecord| true),
     ];
     CLASSES
         .iter()
@@ -738,53 +714,34 @@ fn timing_sums(
             if only.is_some_and(|name| name != state) {
                 continue;
             }
-            let key = format!("{instance}_s{seed}_{state}");
+            let key = marginal::state_key(instance, *seed, state);
             if !has_part(measurement, "timings", &key) {
                 continue;
             }
-            let gains =
-                read(&parts_directory(measurement, "gains").join(format!("{key}.parquet")))?;
-            let mut work: HashMap<(String, i64, i64), (f64, f64)> = HashMap::new();
-            let (op, anchor, repeat) = (
-                column_str(&gains, "operator")?,
-                column_i64(&gains, "anchor")?,
-                column_i64(&gains, "repeat")?,
-            );
-            let (matrix, cache, positions) = (
-                column_i64(&gains, "matrix_reads")?,
-                column_i64(&gains, "cache_reads")?,
-                column_i64(&gains, "positions")?,
-            );
-            for row in 0..op.len() {
-                work.insert(
-                    (op[row].clone(), anchor[row], repeat[row]),
-                    ((matrix[row] + cache[row]) as f64, positions[row] as f64),
-                );
-            }
+            let work: HashMap<(String, City, u32), Work> = marginal::read_gains(measurement, &key)?
+                .into_iter()
+                .map(|record| ((record.operator, record.anchor, record.repeat), record.work))
+                .collect();
             // Per-call times scaled to each operator's batched mean, the
             // time the measurement's rates use.
             let scales: HashMap<String, f64> = marginal::operator_times(measurement, &key)?
                 .into_iter()
                 .map(|(op, time)| (op, time.scale()))
                 .collect();
-            let times =
-                read(&parts_directory(measurement, "timings").join(format!("{key}.parquet")))?;
-            let (op, anchor, repeat, time) = (
-                column_str(&times, "operator")?,
-                column_i64(&times, "anchor")?,
-                column_i64(&times, "repeat")?,
-                column_f64(&times, "time_ns")?,
-            );
-            for row in 0..op.len() {
-                let (lookups, moved) = *work
-                    .get(&(op[row].clone(), anchor[row], repeat[row]))
+            for record in marginal::read_timings(measurement, &key)? {
+                let application = (record.operator, record.anchor, record.repeat);
+                let work = work
+                    .get(&application)
                     .with_context(|| format!("{key}: timing without pass-1 row"))?;
+                let operator = application.0;
                 let scale = *scales
-                    .get(&op[row])
-                    .with_context(|| format!("{key}: no batched time of {}", op[row]))?;
-                sums.entry(op[row].clone())
-                    .or_default()
-                    .add(lookups, moved, time[row] * scale);
+                    .get(&operator)
+                    .with_context(|| format!("{key}: no batched time of {operator}"))?;
+                sums.entry(operator).or_default().add(
+                    work.lookups() as f64,
+                    work.moved() as f64,
+                    record.time_ns * scale,
+                );
             }
         }
     }
@@ -805,14 +762,10 @@ pub fn plan(repository: &Path, directory: &Path, settings: &Settings) -> anyhow:
         );
     }
     std::fs::create_dir_all(directory)?;
-    let measurement = resolve(repository, &settings.measurement);
-    let config: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(measurement.join("config.json"))?)?;
-    let measured: marginal::Settings =
-        serde_json::from_value(config["settings"]["measurement"].clone())
-            .context("measurement run config")?;
+    let measurement = repository.join(&settings.measurement);
+    let measured = marginal::read_settings(&measurement).context("measurement run config")?;
     let (leaders, rates) = without_retired(
-        read_leaders(&measurement.join("leaders.parquet"))?,
+        marginal::read_leaders(&measurement.join("leaders.parquet"))?,
         marginal::read_rates(&measurement.join("cells.parquet"))?,
     )?;
     let mut rng = Stream::new(settings.seed, "e1r-plan", &[]);
@@ -833,7 +786,7 @@ pub fn plan(repository: &Path, directory: &Path, settings: &Settings) -> anyhow:
         chosen.extend(picks.into_iter().map(|index| members[index].clone()));
     }
     chosen.sort();
-    let files = read_states_directory(&resolve(repository, &measured.states))?;
+    let files = read_states_directory(&repository.join(&measured.states))?;
     let orders: HashMap<(String, u64, String), (String, Vec<City>)> = files
         .into_iter()
         .flat_map(|file| {
@@ -851,7 +804,7 @@ pub fn plan(repository: &Path, directory: &Path, settings: &Settings) -> anyhow:
     for instance in &chosen {
         let ranking = rankings(&leaders, instance)?;
         for (class_index, label) in CLASSES.iter().enumerate() {
-            let mut pool: Vec<&LeaderRow> = leaders
+            let mut pool: Vec<&LeaderRecord> = leaders
                 .iter()
                 .filter(|row| {
                     &row.instance == instance && row.class == *label && row.any_improvement
@@ -938,7 +891,7 @@ pub fn plan(repository: &Path, directory: &Path, settings: &Settings) -> anyhow:
                 let c = model[name];
                 c_instance.push(instance.clone());
                 c_op.push(name.clone());
-                c_state.push(format!("{instance}_s{}_{state}", settings.check_seed));
+                c_state.push(marginal::state_key(instance, settings.check_seed, state));
                 c_error.push(sums.predicted_ns(&c) / sums.time_ns - 1.0);
             }
         }
@@ -998,30 +951,6 @@ pub fn plan(repository: &Path, directory: &Path, settings: &Settings) -> anyhow:
     Ok(())
 }
 
-/// The current operator a plan names.
-///
-/// # Errors
-///
-/// If the name is unknown, or names an operator retired on 2026-11-05: a
-/// plan made before then cannot be run or analysed by this build.
-fn planned_op(name: &str) -> anyhow::Result<Op> {
-    Op::parse_stored(name)?.with_context(|| {
-        format!(
-            "the plan names {name}, retired on 2026-11-05; it was planned before the \
-             retirement and needs the earlier build"
-        )
-    })
-}
-
-fn resolve(repository: &Path, path: &str) -> PathBuf {
-    let path = Path::new(path);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        repository.join(path)
-    }
-}
-
 // ------------------------------------------------------- run directory
 
 /// One (state, candidate) pair.
@@ -1031,21 +960,13 @@ struct Task {
     candidate: Op,
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> anyhow::Result<T> {
-    serde_json::from_str(
-        &std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?,
-    )
-    .with_context(|| format!("parsing {}", path.display()))
-}
-
 /// Reads the settings stored at `plan`.
 ///
 /// # Errors
 ///
 /// If the run has no plan.
-pub fn load_settings(directory: &Path) -> anyhow::Result<Settings> {
-    let config: serde_json::Value = read_json(&directory.join("config.json"))?;
-    serde_json::from_value(config["settings"]["e1r"].clone()).context("E1R settings")
+fn load_settings(directory: &Path) -> anyhow::Result<Settings> {
+    read_settings(directory, "e1r").context("E1R settings")
 }
 
 fn tasks_of(plan: &Plan) -> anyhow::Result<Vec<Task>> {
@@ -1054,7 +975,7 @@ fn tasks_of(plan: &Plan) -> anyhow::Result<Vec<Task>> {
         for name in &state.candidates {
             tasks.push(Task {
                 state: index,
-                candidate: planned_op(name)?,
+                candidate: Op::parse_current(name)?,
             });
         }
     }
@@ -1069,15 +990,13 @@ fn tasks_of(plan: &Plan) -> anyhow::Result<Vec<Task>> {
 }
 
 fn label(state: &PlannedState) -> String {
-    format!("{}:s{}:{}", state.instance, state.seed, state.state)
+    marginal::state_label(&state.instance, state.seed, &state.state)
 }
 
 fn task_key(state: &PlannedState, candidate: Op) -> String {
     format!(
-        "{}_s{}_{}_{}",
-        state.instance,
-        state.seed,
-        state.state,
+        "{}_{}",
+        marginal::state_key(&state.instance, state.seed, &state.state),
         candidate.name()
     )
 }
@@ -1085,74 +1004,69 @@ fn task_key(state: &PlannedState, candidate: Op) -> String {
 fn ranking_ops(plan: &Plan, instance: &str) -> anyhow::Result<Vec<Vec<Op>>> {
     plan.rankings[instance]
         .iter()
-        .map(|class| class.iter().map(|name| planned_op(name)).collect())
+        .map(|class| class.iter().map(|name| Op::parse_current(name)).collect())
         .collect()
 }
 
-/// Runs the repeats of one task.
+/// The first-slice and continuation streams of one rollout.
+struct Streams {
+    first: Stream,
+    continuation: Stream,
+}
+
+impl Streams {
+    /// The streams of repeat `repeat` of a state's rollouts (`run`, and
+    /// their timed replays in `validate`), shared by every candidate.
+    fn repeat(settings: &Settings, state: &PlannedState, repeat: usize) -> Self {
+        let keys = [label_hash(&label(state)), repeat as u64];
+        Self {
+            first: Stream::new(settings.seed, "e1r:first", &keys),
+            continuation: Stream::new(settings.seed, "e1r:continue", &keys),
+        }
+    }
+
+    /// The streams of a candidate's calibration rollout.
+    fn calibration(settings: &Settings, state: &PlannedState, candidate: Op) -> Self {
+        let keys = [label_hash(&label(state)), candidate as u64];
+        Self {
+            first: Stream::new(settings.seed, "e1r:calibrate-first", &keys),
+            continuation: Stream::new(settings.seed, "e1r:calibrate", &keys),
+        }
+    }
+}
+
+/// One rollout of `task` over `horizon_slices` slices; timed when `clock`
+/// is given.
 #[allow(clippy::too_many_arguments)]
-fn run_task(
+fn roll_out(
     instance: &Instance,
     plan: &Plan,
     settings: &Settings,
     model: &CostModel,
     task: &Task,
-    repeats: std::ops::Range<usize>,
+    horizon_slices: usize,
+    streams: Streams,
     clock: Option<&Clock>,
-    calibration: Option<usize>,
-) -> anyhow::Result<Vec<(usize, RolloutResult)>> {
+) -> anyhow::Result<RolloutResult> {
     let state = &plan.states[task.state];
     let ranking = ranking_ops(plan, &state.instance)?;
     let slice_ns = settings.slice_ns_per_city * state.n as f64;
-    let horizon = calibration.unwrap_or(settings.horizon_slices) as f64 * slice_ns;
-    let label = label(state);
-    repeats
-        .map(|repeat| {
-            let (first, continuation) = match calibration {
-                None => (
-                    Stream::new(
-                        settings.seed,
-                        "e1r:first",
-                        &[label_hash(&label), repeat as u64],
-                    ),
-                    Stream::new(
-                        settings.seed,
-                        "e1r:continue",
-                        &[label_hash(&label), repeat as u64],
-                    ),
-                ),
-                Some(_) => (
-                    Stream::new(
-                        settings.seed,
-                        "e1r:calibrate-first",
-                        &[label_hash(&label), task.candidate as u64],
-                    ),
-                    Stream::new(
-                        settings.seed,
-                        "e1r:calibrate",
-                        &[label_hash(&label), task.candidate as u64],
-                    ),
-                ),
-            };
-            let result = dispatch(
-                Rollout {
-                    order: &state.order,
-                    first: task.candidate,
-                    ranking: &ranking,
-                    stall: settings.stall_rule,
-                    model,
-                    slice_ns,
-                    horizon_ns: horizon,
-                    first_stream: first,
-                    continuation_stream: continuation,
-                    clock,
-                },
-                instance,
-                &plan.implementation,
-            )?;
-            Ok((repeat, result))
-        })
-        .collect()
+    dispatch(
+        Rollout {
+            order: &state.order,
+            first: task.candidate,
+            ranking: &ranking,
+            stall: settings.stall_rule,
+            model,
+            slice_ns,
+            horizon_ns: horizon_slices as f64 * slice_ns,
+            first_stream: streams.first,
+            continuation_stream: streams.continuation,
+            clock,
+        },
+        instance,
+        &plan.implementation,
+    )
 }
 
 /// Stage `calibrate`: timed rollouts on one pinned core; refit the clock.
@@ -1166,47 +1080,40 @@ pub fn calibrate(repository: &Path, directory: &Path, allow_unlocked: bool) -> a
     let plan: Plan = read_json(&directory.join("plan.json"))?;
     let provisional: BTreeMap<String, CostModel> =
         read_json(&directory.join("cost_models_e1.json"))?;
-    let cores = pin::physical_cores()?;
-    let problems = machine::require_locked(&cores, allow_unlocked)?;
-    pin::pin_current_thread(cores[0])?;
-    let clock = Clock::calibrate(5, 200)?;
+    let TimedSession {
+        roles,
+        problems,
+        clock,
+    } = TimedSession::open(CoreRoles::main_times()?, allow_unlocked)?;
     write_atomic(
         &directory.join("calibrate.json"),
         serde_json::to_string_pretty(
-            &json!({"machine_problems": problems, "clock": clock, "cpu": cores[0]}),
+            &json!({"machine_problems": problems, "clock": clock, "cpu": roles.main}),
         )?
         .as_bytes(),
     )?;
     let tasks = tasks_of(&plan)?;
     let mut sums: BTreeMap<String, BTreeMap<String, Sums>> = BTreeMap::new();
-    let mut instances: HashMap<String, Instance> = HashMap::new();
+    let mut instances = InstanceCache::new();
     let mut collect = |sums: &mut BTreeMap<String, BTreeMap<String, Sums>>,
                        task: &Task,
                        slices: usize|
      -> anyhow::Result<()> {
         let state = &plan.states[task.state];
-        if !instances.contains_key(&state.instance) {
-            instances.clear();
-            instances.insert(
-                state.instance.clone(),
-                load_instance(repository, &state.path)?,
-            );
-        }
-        let instance = &instances[&state.instance];
-        for (_, result) in run_task(
-            instance,
+        let instance = instances.get(repository, &state.path)?;
+        let result = roll_out(
+            &instance,
             &plan,
             &settings,
             &provisional[&state.instance],
             task,
-            0..1,
+            slices,
+            Streams::calibration(&settings, state, task.candidate),
             Some(&clock),
-            Some(slices),
-        )? {
-            let entry = sums.entry(state.instance.clone()).or_default();
-            for (name, add) in &result.sums {
-                entry.entry(name.clone()).or_default().merge(add);
-            }
+        )?;
+        let entry = sums.entry(state.instance.clone()).or_default();
+        for (name, add) in &result.sums {
+            entry.entry(name.clone()).or_default().merge(add);
         }
         Ok(())
     };
@@ -1240,7 +1147,7 @@ pub fn calibrate(repository: &Path, directory: &Path, allow_unlocked: bool) -> a
             .unwrap_or_default();
         for name in needed.iter().filter(|name| !have.contains(name)) {
             log::info!("calibrate: {instance} never ran {name}; timing it directly");
-            let op = planned_op(name)?;
+            let op = Op::parse_current(name)?;
             for &index in &indices {
                 collect(
                     &mut sums,
@@ -1406,7 +1313,7 @@ pub fn run(repository: &Path, directory: &Path, workers: usize) -> anyhow::Resul
             )
         })
         .collect();
-    let workers = if workers == 0 { all_cpus() } else { workers };
+    let workers = untimed_workers(workers);
     log::info!(
         "run: {} tasks to do, {} done, {workers} threads",
         todo.len(),
@@ -1421,16 +1328,21 @@ pub fn run(repository: &Path, directory: &Path, workers: usize) -> anyhow::Resul
         |task| {
             let state = &plan.states[task.state];
             let instance = load_instance(repository, &state.path)?;
-            let results = run_task(
-                &instance,
-                &plan,
-                &settings,
-                &models[&state.instance],
-                task,
-                0..settings.repeats,
-                None,
-                None,
-            )?;
+            let results = (0..settings.repeats)
+                .map(|repeat| {
+                    let result = roll_out(
+                        &instance,
+                        &plan,
+                        &settings,
+                        &models[&state.instance],
+                        task,
+                        settings.horizon_slices,
+                        Streams::repeat(&settings, state, repeat),
+                        None,
+                    )?;
+                    Ok((repeat, result))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
             write_results(
                 directory,
                 &task_key(state, task.candidate),
@@ -1551,10 +1463,11 @@ pub fn validate(
             task_key(&plan.states[task.state], task.candidate)
         );
     }
-    let cores = pin::physical_cores()?;
-    let problems = machine::require_locked(&cores, allow_unlocked)?;
-    pin::pin_current_thread(cores[0])?;
-    let clock = Clock::calibrate(5, 200)?;
+    let TimedSession {
+        roles: _,
+        problems,
+        clock,
+    } = TimedSession::open(CoreRoles::main_times()?, allow_unlocked)?;
     let mut rng = Stream::new(settings.seed, "e1r-validate", &[]);
     let pairs: Vec<(usize, usize)> = (0..tasks.len())
         .flat_map(|task| (0..settings.repeats).map(move |repeat| (task, repeat)))
@@ -1569,24 +1482,22 @@ pub fn validate(
         let task = &tasks[task_index];
         let state = &plan.states[task.state];
         let key = task_key(state, task.candidate);
-        let stored = read(&parts_directory(directory, "repeats").join(format!("{key}.parquet")))?;
+        let stored = read_part(directory, "repeats", &key)?;
         let row = column_i64(&stored, "repeat")?
             .iter()
             .position(|&value| value as usize == repeat)
             .context("stored repeat missing")?;
         let instance = load_instance(repository, &state.path)?;
-        let (_, result) = run_task(
+        let result = roll_out(
             &instance,
             &plan,
             &settings,
             &models[&state.instance],
             task,
-            repeat..repeat + 1,
+            settings.horizon_slices,
+            Streams::repeat(&settings, state, repeat),
             Some(&clock),
-            None,
-        )?
-        .pop()
-        .context("one rollout")?;
+        )?;
         if result.final_length != column_i64(&stored, "final_length")?[row]
             || result.end_ns != column_f64(&stored, "end_ns")?[row]
         {
@@ -1658,8 +1569,8 @@ type GapsAndTimes = (Vec<Vec<f64>>, Vec<Vec<f64>>);
 /// Gaps of every repeat (sorted) at every cut, with the times they were
 /// reached (see [`GapsAndTimes`]).
 fn gaps(directory: &Path, key: &str, optimum: f64, cuts: &[f64]) -> anyhow::Result<GapsAndTimes> {
-    let repeats = read(&parts_directory(directory, "repeats").join(format!("{key}.parquet")))?;
-    let events = read(&parts_directory(directory, "events").join(format!("{key}.parquet")))?;
+    let repeats = read_part(directory, "repeats", key)?;
+    let events = read_part(directory, "events", key)?;
     let initial = column_i64(&repeats, "initial_length")?[0];
     let mut repeat_ids = column_i64(&repeats, "repeat")?;
     repeat_ids.sort_unstable();
@@ -2091,7 +2002,7 @@ impl AnalysisRun<'_> {
             let mut matrix: BTreeMap<String, Vec<Vec<f64>>> = BTreeMap::new();
             let mut reached: BTreeMap<String, Vec<Vec<f64>>> = BTreeMap::new();
             for name in candidates {
-                let op = planned_op(name)?;
+                let op = Op::parse_current(name)?;
                 let key = task_key(state, op);
                 let (gap_rows, time_rows) =
                     gaps(directory, &key, optima[&state.instance], &cut_ns)?;

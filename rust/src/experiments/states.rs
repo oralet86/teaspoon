@@ -21,22 +21,57 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::json;
 
-use super::common::{StateRecord, StatesFile, all_cpus, load_instance, parallel_map};
+use super::common::{StateRecord, StatesFile, load_instance, parallel_map, untimed_workers};
 use crate::City;
 use crate::instance::Instance;
 use crate::instance::storage::{Dist, Matrix};
 use crate::io::provenance::write_config;
 use crate::io::rundir::{new_run_directory, write_atomic};
-use crate::ops::{Op, Problem, Work, descend, improve_city};
+use crate::ops::{Op, Problem, Work, descend, descend_until};
 use crate::rng::{Stream, label_hash};
 use crate::tour::Tour;
 use crate::tour::array::Array;
 
-/// Shares of the full descent's gain at which partial descents stop.
-pub const FRACTIONS: [f64; 4] = [0.25, 0.5, 0.75, 0.9];
+/// The partial descents: state name and the share of the full descent's
+/// gain at which the descent stops.
+const PARTIAL_DESCENTS: [(&str, f64); 4] =
+    [("d25", 0.25), ("d50", 0.5), ("d75", 0.75), ("d90", 0.9)];
 
-/// Kick trials per round of iterated local search, in multiples of n.
-pub const ILS_ROUNDS: [usize; 2] = [1, 4];
+/// The rounds of iterated local search: state name and kick trials, in
+/// multiples of n.
+const ILS_ROUNDS: [(&str, usize); 2] = [("ils1", 1), ("ils2", 4)];
+
+/// The state names in building order ([`build`] checks that it builds
+/// exactly these).
+pub const STATE_NAMES: [&str; 12] = [
+    "random",
+    "nearest_neighbour",
+    PARTIAL_DESCENTS[0].0,
+    PARTIAL_DESCENTS[1].0,
+    PARTIAL_DESCENTS[2].0,
+    PARTIAL_DESCENTS[3].0,
+    "opt2",
+    "oropt",
+    "opt3",
+    "lkopt",
+    ILS_ROUNDS[0].0,
+    ILS_ROUNDS[1].0,
+];
+
+/// States with many defects, which the budgeted runs skip on large
+/// instances (kicks and descents there run over the whole tour).
+pub const EARLY_STATES: [&str; 2] = [STATE_NAMES[0], STATE_NAMES[1]];
+
+/// Largest instance on which budgeted runs measure the [`EARLY_STATES`].
+pub const EARLY_STATES_MAX_N: usize = 1000;
+
+/// Position of a state name in [`STATE_NAMES`] (unknown names last).
+pub fn state_rank(name: &str) -> usize {
+    STATE_NAMES
+        .iter()
+        .position(|state| *state == name)
+        .unwrap_or(STATE_NAMES.len())
+}
 
 /// Settings of one states run.
 #[derive(Debug, Clone, Serialize)]
@@ -52,7 +87,7 @@ pub struct Settings {
 }
 
 /// The nearest-neighbour tour from `start`; ties go to the smaller index.
-pub fn nearest_neighbour_tour(matrix: &Matrix, start: City) -> Vec<City> {
+fn nearest_neighbour_tour(matrix: &Matrix, start: City) -> Vec<City> {
     let n = matrix.n();
     let mut visited = vec![false; n];
     let mut order = Vec::with_capacity(n);
@@ -80,10 +115,7 @@ fn vnd(tour: &mut Tour<Array>, problem: &Problem<'_, Matrix, true>, visit: &[Cit
     loop {
         let mut improved = false;
         for &city in visit {
-            if improve_city(tour, problem, problem.neighbours, city, &mut work).0 < 0 {
-                improved = true;
-            }
-            for op in ops {
+            for op in std::iter::once(&Op::TwoOptNl).chain(ops) {
                 if op
                     .apply(tour, problem, &mut rng, &mut work, Some(city))
                     .delta
@@ -107,11 +139,7 @@ fn vnd(tour: &mut Tour<Array>, problem: &Problem<'_, Matrix, true>, visit: &[Cit
 /// If a built tour fails its check.
 pub fn build(instance: &Instance, path: &str, seed: u64) -> anyhow::Result<StatesFile> {
     let n = instance.n();
-    let problem: Problem<'_, Matrix, true> = Problem {
-        dist: &instance.matrix,
-        neighbours: &instance.neighbours,
-        alpha: instance.alpha.as_ref(),
-    };
+    let problem: Problem<'_, Matrix, true> = Problem::new(&instance.matrix, instance);
     let mut rng = Stream::new(seed, "e1-states", &[label_hash(&instance.name)]);
     let mut random: Vec<City> = (0..n as City).collect();
     rng.shuffle(&mut random);
@@ -152,20 +180,20 @@ pub fn build(instance: &Instance, path: &str, seed: u64) -> anyhow::Result<State
         format!("nearest neighbour from city {start}"),
     )?;
     let mut full: Tour<Array> = Tour::new(&greedy, &instance.matrix);
-    let total = -descend(&mut full, &problem, &mut Work::default(), &visit, None);
+    let total = -descend(&mut full, &problem, &mut Work::default(), &visit);
     full.clear_log();
-    for fraction in FRACTIONS {
+    for (name, fraction) in PARTIAL_DESCENTS {
         let mut partial: Tour<Array> = Tour::new(&greedy, &instance.matrix);
         let stop = (fraction * total as f64).ceil() as i64;
-        descend(
+        descend_until(
             &mut partial,
             &problem,
             &mut Work::default(),
             &visit,
-            Some(stop.max(1)),
+            stop.max(1),
         );
         add(
-            format!("d{:02}", (fraction * 100.0).round() as u32),
+            name.into(),
             &partial,
             format!(
                 "O7 descent from nearest neighbour stopped at {:.0}% of its full gain",
@@ -183,11 +211,7 @@ pub fn build(instance: &Instance, path: &str, seed: u64) -> anyhow::Result<State
     add("oropt".into(), &tour, "VND (O7, O9) from opt2".into())?;
     vnd(&mut tour, &problem, &visit, &[Op::OrOptNl, Op::ThreeOptNl]);
     add("opt3".into(), &tour, "VND (O7, O9, O10) from oropt".into())?;
-    let lk = if instance.alpha.is_some() {
-        Op::LinKernighanAlpha
-    } else {
-        Op::LinKernighan
-    };
+    let lk = Op::lin_kernighan_for(&problem);
     let lk_ops = [Op::OrOptNl, Op::ThreeOptNl, lk];
     vnd(&mut tour, &problem, &visit, &lk_ops);
     add(
@@ -197,7 +221,7 @@ pub fn build(instance: &Instance, path: &str, seed: u64) -> anyhow::Result<State
     )?;
     let mut kick_rng = Stream::new(seed, "e1-states-ils", &[label_hash(&instance.name)]);
     let mut done = 0;
-    for (index, rounds) in ILS_ROUNDS.iter().enumerate() {
+    for (name, rounds) in ILS_ROUNDS {
         let mut work = Work::default();
         for _ in 0..rounds * n {
             Op::Kick.apply(&mut tour, &problem, &mut kick_rng, &mut work, None);
@@ -206,11 +230,16 @@ pub fn build(instance: &Instance, path: &str, seed: u64) -> anyhow::Result<State
         done += rounds;
         vnd(&mut tour, &problem, &visit, &lk_ops);
         add(
-            format!("ils{}", index + 1),
+            name.into(),
             &tour,
             format!("lkopt after {done}n O8 kick trials, then LK VND"),
         )?;
     }
+    let built: Vec<&str> = states.iter().map(|state| state.name.as_str()).collect();
+    anyhow::ensure!(
+        built == STATE_NAMES,
+        "built states {built:?} differ from STATE_NAMES"
+    );
     Ok(StatesFile {
         instance: instance.name.clone(),
         path: path.to_string(),
@@ -219,6 +248,14 @@ pub fn build(instance: &Instance, path: &str, seed: u64) -> anyhow::Result<State
         state_seed: seed,
         states,
     })
+}
+
+/// One (instance, seed) to build.
+struct StatesTask {
+    path: String,
+    name: String,
+    seed: u64,
+    n: usize,
 }
 
 /// Builds every (instance, seed) in parallel and writes the states files
@@ -245,29 +282,30 @@ pub fn run(
         json!({
             "experiment": "E1 states by local-optimality level",
             "settings": settings,
-            "fractions": FRACTIONS,
-            "ils_rounds": ILS_ROUNDS,
+            "fractions": PARTIAL_DESCENTS.map(|(_, fraction)| fraction),
+            "ils_rounds": ILS_ROUNDS.map(|(_, rounds)| rounds),
         }),
     )?;
     let states_directory = directory.join("states");
     std::fs::create_dir_all(&states_directory)?;
     let mut tasks = Vec::new();
     for path in &settings.instances {
-        let n = crate::instance::tsplib::read(&repository.join(path))?.dimension;
-        let seeds = if n <= settings.single_seed_above {
+        let file = crate::instance::tsplib::read(&repository.join(path))?;
+        let seeds = if file.dimension <= settings.single_seed_above {
             &settings.seeds[..]
         } else {
             &settings.seeds[..1]
         };
-        tasks.extend(seeds.iter().map(|&seed| (path.clone(), seed, n)));
+        tasks.extend(seeds.iter().map(|&seed| StatesTask {
+            path: path.clone(),
+            name: file.name.clone(),
+            seed,
+            n: file.dimension,
+        }));
     }
     // Large instances first, so the longest tasks do not finish last.
-    tasks.sort_by_key(|(path, seed, n)| (std::cmp::Reverse(*n), path.clone(), *seed));
-    let workers = if settings.workers == 0 {
-        all_cpus()
-    } else {
-        settings.workers
-    };
+    tasks.sort_by_key(|task| (std::cmp::Reverse(task.n), task.path.clone(), task.seed));
+    let workers = untimed_workers(settings.workers);
     log::info!(
         "building {} (instance, seed) pairs on {workers} threads",
         tasks.len()
@@ -275,26 +313,20 @@ pub fn run(
     parallel_map(
         &tasks,
         workers,
-        |(path, seed, _)| format!("{path} seed {seed}"),
-        |(path, seed, _)| {
-            let target = states_directory.join(format!(
-                "{}_s{seed}.json",
-                Path::new(path)
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("instance")
-            ));
+        |task| format!("{} seed {}", task.path, task.seed),
+        |task| {
+            // Named by the TSPLIB `NAME`, which the states file records.
+            let key = format!("{}_s{}", task.name, task.seed);
+            let target = states_directory.join(format!("{key}.json"));
             if target.is_file() {
                 return Ok(());
             }
             let started = std::time::Instant::now();
-            let instance = load_instance(repository, path)?;
-            let file = build(&instance, path, *seed)?;
-            let target = states_directory.join(format!("{}_s{seed}.json", file.instance));
+            let instance = load_instance(repository, &task.path)?;
+            let file = build(&instance, &task.path, task.seed)?;
             write_atomic(&target, (serde_json::to_string(&file)? + "\n").as_bytes())?;
             log::info!(
-                "{}_s{seed}: {} states in {:.1} s",
-                file.instance,
+                "{key}: {} states in {:.1} s",
                 file.states.len(),
                 started.elapsed().as_secs_f64()
             );

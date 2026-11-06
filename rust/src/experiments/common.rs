@@ -3,6 +3,7 @@
 //! an untimed parallel map, and batched timing.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use crate::City;
 use crate::instance::Instance;
 use crate::instance::alpha::CACHE_DIRECTORY;
 use crate::instance::storage::{Computed, Dist, Matrix};
+use crate::io::rundir::read_json;
 use crate::ops::{Op, Problem, Work};
 use crate::rng::Stream;
 use crate::timing::counters::{self, Counts};
@@ -23,34 +25,6 @@ use crate::tour::{Layout, Replay, Tour};
 /// Local-optimality classes in order of search progress (the labels of the
 /// Python analysis, `aos.analysis.e1.CLASSES`).
 pub const CLASSES: [&str; 4] = ["2-opt open", "2-opt optimum", "3-opt optimum", "LK optimum"];
-
-/// The state names of the E1 builder, in search order.
-pub const STATE_NAMES: [&str; 12] = [
-    "random",
-    "nearest_neighbour",
-    "d25",
-    "d50",
-    "d75",
-    "d90",
-    "opt2",
-    "oropt",
-    "opt3",
-    "lkopt",
-    "ils1",
-    "ils2",
-];
-
-/// States with many defects, which the budgeted runs skip on large
-/// instances (kicks and descents there run over the whole tour).
-pub const EARLY_STATES: [&str; 2] = ["random", "nearest_neighbour"];
-
-/// Position of a state name in [`STATE_NAMES`] (unknown names last).
-pub fn state_rank(name: &str) -> usize {
-    STATE_NAMES
-        .iter()
-        .position(|state| *state == name)
-        .unwrap_or(STATE_NAMES.len())
-}
 
 /// Family of an instance: its generator's, or `TSPLIB` for any other name
 /// (`aos.analysis.e1_marginal.instance_family`).
@@ -123,14 +97,7 @@ pub fn read_states_directory(directory: &Path) -> anyhow::Result<Vec<StatesFile>
     if paths.is_empty() {
         bail!("no states files in {}", directory.display());
     }
-    paths
-        .iter()
-        .map(|path| {
-            let text = std::fs::read_to_string(path)
-                .with_context(|| format!("reading {}", path.display()))?;
-            serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
-        })
-        .collect()
+    paths.iter().map(|path| read_json(path)).collect()
 }
 
 /// Loads an instance by its repository-relative path, with alpha
@@ -144,6 +111,38 @@ pub fn load_instance(repository: &Path, path: &str) -> anyhow::Result<Instance> 
     let mut instance = Instance::load(&repository.join(path), &cache)?;
     instance.ensure_alpha(&cache)?;
     Ok(instance)
+}
+
+/// The last instance a worker loaded, kept while its tasks stay on that
+/// instance (tasks come sorted or grouped by instance).
+#[derive(Debug, Default)]
+pub struct InstanceCache {
+    cached: Option<(String, Arc<Instance>)>,
+}
+
+impl InstanceCache {
+    /// An empty cache.
+    pub const fn new() -> Self {
+        Self { cached: None }
+    }
+
+    /// The instance at the repository-relative `path` ([`load_instance`]),
+    /// loaded unless it is the cached one.
+    ///
+    /// # Errors
+    ///
+    /// If the instance cannot be loaded.
+    pub fn get(&mut self, repository: &Path, path: &str) -> anyhow::Result<Arc<Instance>> {
+        if let Some((cached_path, instance)) = &self.cached
+            && cached_path == path
+        {
+            return Ok(instance.clone());
+        }
+        self.cached = None;
+        let instance = Arc::new(load_instance(repository, path)?);
+        self.cached = Some((path.to_string(), instance.clone()));
+        Ok(instance)
+    }
 }
 
 /// Distance storage of a run (`ideas/rust-port.md` §4.2, §9).
@@ -168,6 +167,10 @@ pub enum LayoutChoice {
     TwoLevel,
 }
 
+/// The size from which [`LayoutChoice::Auto`] uses the two-level list (from
+/// E0-rs's representation threshold).
+pub const DEFAULT_N_SPLIT: usize = 1000;
+
 /// The implementation choices a run fixes (main design or one robustness
 /// factor changed).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -188,7 +191,7 @@ impl Default for Implementation {
             storage: Storage::Matrix,
             cache: true,
             layout: LayoutChoice::Auto,
-            n_split: 1000,
+            n_split: DEFAULT_N_SPLIT,
         }
     }
 }
@@ -200,15 +203,6 @@ impl Implementation {
             LayoutChoice::Auto => n >= self.n_split,
             LayoutChoice::Array => false,
             LayoutChoice::TwoLevel => true,
-        }
-    }
-
-    /// The layout name used on an instance of `n` cities.
-    pub fn layout_name(&self, n: usize) -> &'static str {
-        if self.two_level(n) {
-            Blocks::NAME
-        } else {
-            Array::NAME
         }
     }
 }
@@ -249,18 +243,10 @@ fn with_cache<J: Job, D: Dist>(
     two_level: bool,
 ) -> anyhow::Result<J::Output> {
     if cache {
-        let problem: Problem<'_, D, true> = Problem {
-            dist,
-            neighbours: &instance.neighbours,
-            alpha: instance.alpha.as_ref(),
-        };
+        let problem: Problem<'_, D, true> = Problem::new(dist, instance);
         with_layout(job, instance, &problem, two_level)
     } else {
-        let problem: Problem<'_, D, false> = Problem {
-            dist,
-            neighbours: &instance.neighbours,
-            alpha: instance.alpha.as_ref(),
-        };
+        let problem: Problem<'_, D, false> = Problem::new(dist, instance);
         with_layout(job, instance, &problem, two_level)
     }
 }
@@ -293,12 +279,6 @@ pub fn dispatch<J: Job>(
             with_cache::<J, Computed>(job, instance, computed, implementation.cache, two_level)
         }
     }
-}
-
-/// A tour of `order` in layout `L`, its length computed from the matrix
-/// (every storage gives identical distances).
-pub fn tour_of<L: Layout>(instance: &Instance, order: &[City]) -> Tour<L> {
-    Tour::new(order, &instance.matrix)
 }
 
 /// Applies `job` to every item on a `rayon` pool of `workers` threads
@@ -335,6 +315,15 @@ pub fn all_cpus() -> usize {
     std::thread::available_parallelism().map_or(1, usize::from)
 }
 
+/// The untimed worker count a run asked for, `0` meaning every CPU.
+pub fn untimed_workers(requested: usize) -> usize {
+    if requested == 0 {
+        all_cpus()
+    } else {
+        requested
+    }
+}
+
 // ------------------------------------------------------- batched timing
 
 /// The timed passes over one operator's anchors (`ideas/rust-port.md`
@@ -353,6 +342,9 @@ pub enum Pass {
 }
 
 impl Pass {
+    /// Every pass: the most an operator makes over its anchors per round.
+    pub const ALL: [Pass; 3] = [Pass::PerCall, Pass::Batch, Pass::Restore];
+
     /// The passes of one operator over its anchors in an order drawn from
     /// `rng`, so that no pass always finds the caches warmed by another:
     /// per call and batched always, the restore batch only when some
@@ -400,7 +392,7 @@ pub fn warm_up<D: Dist, const C: bool, L: Layout>(
 ///
 /// If `streams` or `deltas` do not have one entry per anchor.
 #[allow(clippy::too_many_arguments)]
-pub fn timed_batch<D: Dist, const C: bool, L: Layout>(
+fn timed_batch<D: Dist, const C: bool, L: Layout>(
     tour: &mut Tour<L>,
     problem: &Problem<'_, D, C>,
     op: Op,
@@ -438,13 +430,13 @@ pub struct Sample {
 }
 
 /// A timed region shorter than this (ns) is timed again (see [`sampled`]).
-pub const SAMPLE_TARGET_NS: f64 = 1_000_000.0;
+const SAMPLE_TARGET_NS: f64 = 1_000_000.0;
 /// Fewest samples of a region shorter than [`SAMPLE_TARGET_NS`].
-pub const MIN_SAMPLES: usize = 3;
+const MIN_SAMPLES: usize = 3;
 /// Most samples of a region.
-pub const MAX_SAMPLES: usize = 9;
+const MAX_SAMPLES: usize = 9;
 /// Most retakes of a disturbed set of samples (then it is kept as it is).
-pub const MAX_RETAKES: usize = 10;
+const MAX_RETAKES: usize = 10;
 
 /// The median of repeated timings of one region, `region` timing it once.
 /// A region of at least [`SAMPLE_TARGET_NS`] is timed once: an interrupt

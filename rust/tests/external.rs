@@ -21,7 +21,8 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use aos::City;
-use aos::instance::neighbours::{CandidateLists, NEIGHBOURS};
+use aos::instance::alpha::CACHE_DIRECTORY;
+use aos::instance::neighbours::{ALPHA_CANDIDATES, CandidateLists, NEIGHBOURS};
 use aos::instance::storage::{Computed, Dist, Matrix};
 use aos::instance::tour_length;
 use aos::instance::tsplib::CoordinateKind;
@@ -192,7 +193,7 @@ fn alpha_with_lkh_penalties_matches_lkh() {
             })
             .find(|candidate| candidate.is_file())
             .unwrap();
-        let instance = Instance::load(&file, &repository.join("data/cache/candidates-rs")).unwrap();
+        let instance = Instance::load(&file, &repository.join(CACHE_DIRECTORY)).unwrap();
         let n = instance.n();
         let scaled = Matrix::new(
             n,
@@ -210,7 +211,7 @@ fn alpha_with_lkh_penalties_matches_lkh() {
             };
             pi[id.parse::<usize>().unwrap() - 1] = value.parse::<f64>().unwrap();
         }
-        let ours = alpha_candidates(&scaled, &pi, 5);
+        let ours = alpha_candidates(&scaled, &pi, ALPHA_CANDIDATES);
         let theirs = lkh_candidates(&path);
         let same = (0..n)
             .filter(|&c| {

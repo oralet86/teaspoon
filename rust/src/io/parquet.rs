@@ -129,8 +129,13 @@ pub fn write(path: &Path, table: Table) -> anyhow::Result<()> {
 }
 
 /// The part directory of table `name` in `directory`.
-pub fn parts_directory(directory: &Path, name: &str) -> PathBuf {
+fn parts_directory(directory: &Path, name: &str) -> PathBuf {
     directory.join(format!("{name}.parts"))
+}
+
+/// The file of part `key` of table `name` in `directory`.
+fn part_path(directory: &Path, name: &str, key: &str) -> PathBuf {
+    parts_directory(directory, name).join(format!("{key}.parquet"))
 }
 
 /// Writes one finished part of table `name` (atomically).  The presence of
@@ -140,16 +145,31 @@ pub fn parts_directory(directory: &Path, name: &str) -> PathBuf {
 ///
 /// If the part cannot be written.
 pub fn write_part(directory: &Path, name: &str, key: &str, table: Table) -> anyhow::Result<()> {
-    let parts = parts_directory(directory, name);
-    std::fs::create_dir_all(&parts)?;
-    write(&parts.join(format!("{key}.parquet")), table)
+    std::fs::create_dir_all(parts_directory(directory, name))?;
+    write(&part_path(directory, name, key), table)
 }
 
 /// Whether part `key` of table `name` exists.
 pub fn has_part(directory: &Path, name: &str, key: &str) -> bool {
-    parts_directory(directory, name)
-        .join(format!("{key}.parquet"))
-        .is_file()
+    part_path(directory, name, key).is_file()
+}
+
+/// Reads part `key` of table `name`.
+///
+/// # Errors
+///
+/// If the part is missing or cannot be read.
+pub fn read_part(directory: &Path, name: &str, key: &str) -> anyhow::Result<RecordBatch> {
+    read(&part_path(directory, name, key))
+}
+
+/// Whether table `name` has any part yet.
+pub fn has_parts(directory: &Path, name: &str) -> anyhow::Result<bool> {
+    match std::fs::read_dir(parts_directory(directory, name)) {
+        Ok(mut entries) => Ok(entries.next().is_some()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).context(format!("reading the parts of {name}")),
+    }
 }
 
 /// Reads every row of a Parquet file as one batch.

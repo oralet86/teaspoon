@@ -65,7 +65,7 @@ pub fn tour_length(dist: &impl Dist, order: &[City]) -> i64 {
 /// # Errors
 ///
 /// If the entry exists but is not a whole number.
-pub fn listed_optimum(listing: &Path, name: &str) -> anyhow::Result<Option<i64>> {
+fn listed_optimum(listing: &Path, name: &str) -> anyhow::Result<Option<i64>> {
     if !listing.is_file() {
         return Ok(None);
     }
@@ -121,26 +121,41 @@ impl Instance {
                 (matrix, Some(computed))
             }
         };
-        let neighbours = CandidateLists::nearest(&matrix, NEIGHBOURS);
         let optimum = match companion_tour(path) {
             Some(tour_path) => Some(tour_length(&matrix, &tsplib::read_tour(&tour_path, n)?)),
             None => listed_optimum(&path.with_file_name("solution.txt"), &file.name)?,
         };
-        let mut instance = Self {
-            name: file.name,
-            path: path.to_path_buf(),
-            sha256,
-            matrix,
-            computed,
-            neighbours,
-            alpha: None,
-            optimum,
-        };
+        let mut instance =
+            Self::from_distances(file.name, path.to_path_buf(), sha256, matrix, computed);
+        instance.optimum = optimum;
         let key = instance.alpha_key(AscentSettings::default());
         if let Some(lists) = alpha::load_cached(alpha_cache, &instance.name, &key)? {
             instance.attach_alpha(&lists)?;
         }
         Ok(instance)
+    }
+
+    /// An instance of the distances `matrix` (computed from `computed` when
+    /// it has coordinates) with its nearest neighbours, no alpha candidates
+    /// and no known optimum.
+    pub fn from_distances(
+        name: String,
+        path: PathBuf,
+        sha256: String,
+        matrix: Matrix,
+        computed: Option<Computed>,
+    ) -> Self {
+        let neighbours = CandidateLists::nearest(&matrix, NEIGHBOURS);
+        Self {
+            name,
+            path,
+            sha256,
+            matrix,
+            computed,
+            neighbours,
+            alpha: None,
+            optimum: None,
+        }
     }
 
     /// Number of cities.
@@ -182,12 +197,22 @@ impl Instance {
         if self.alpha.is_some() {
             return Ok(false);
         }
-        let ascent = AscentSettings::default();
-        let key = self.alpha_key(ascent);
-        let pi = alpha::ascend(&self.matrix, ascent);
-        let lists = alpha::alpha_candidates(&self.matrix, &pi, ALPHA_CANDIDATES);
+        let lists = self.compute_alpha()?;
+        let key = self.alpha_key(AscentSettings::default());
         alpha::store(alpha_cache, &self.name, &key, &lists)?;
-        self.attach_alpha(&lists)?;
         Ok(true)
+    }
+
+    /// Computes and attaches alpha candidates (untimed; O(n²) per ascent
+    /// iteration), without the cache; returns the lists.
+    ///
+    /// # Errors
+    ///
+    /// If the lists are inconsistent with the matrix.
+    pub fn compute_alpha(&mut self) -> anyhow::Result<Vec<Vec<City>>> {
+        let pi = alpha::ascend(&self.matrix, AscentSettings::default());
+        let lists = alpha::alpha_candidates(&self.matrix, &pi, ALPHA_CANDIDATES);
+        self.attach_alpha(&lists)?;
+        Ok(lists)
     }
 }

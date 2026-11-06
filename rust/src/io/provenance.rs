@@ -4,10 +4,11 @@
 use std::path::Path;
 use std::process::Command;
 
+use anyhow::Context;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::timing::machine;
+use crate::timing::{machine, tsc};
 
 /// What the binary was built from (embedded by `build.rs`).
 #[derive(Debug, Clone, Serialize)]
@@ -27,7 +28,7 @@ pub struct Build {
 }
 
 /// The build of the running binary.
-pub const BUILD: Build = Build {
+const BUILD: Build = Build {
     source_sha256: env!("AOS_SOURCE_SHA256"),
     cargo_lock_sha256: env!("AOS_CARGO_LOCK_SHA256"),
     rustc: env!("AOS_RUSTC_VERSION"),
@@ -50,7 +51,7 @@ fn git(repository: &Path, arguments: &[&str]) -> Option<String> {
 }
 
 /// Git commit and dirty flag of the repository at run time.
-pub fn git_state(repository: &Path) -> Value {
+fn git_state(repository: &Path) -> Value {
     let commit = git(repository, &["rev-parse", "HEAD"]);
     let dirty = git(
         repository,
@@ -61,15 +62,15 @@ pub fn git_state(repository: &Path) -> Value {
 }
 
 /// The host: CPU model and the flags that matter for timing, kernel.
-pub fn host() -> Value {
+fn host() -> Value {
     let flags = machine::cpu_flags().unwrap_or_default();
     let relevant: Vec<&String> = flags
         .iter()
         .filter(|flag| {
-            matches!(
-                flag.as_str(),
-                "constant_tsc" | "nonstop_tsc" | "rdtscp" | "avx2" | "avx512f" | "ht"
-            )
+            tsc::CLOCK_FLAGS
+                .into_iter()
+                .chain(["avx2", "avx512f", "ht"])
+                .any(|relevant| flag.as_str() == relevant)
         })
         .collect();
     json!({
@@ -98,5 +99,25 @@ pub fn provenance(repository: &Path) -> Value {
 pub fn write_config(directory: &Path, repository: &Path, settings: Value) -> anyhow::Result<()> {
     let payload = json!({ "provenance": provenance(repository), "settings": settings });
     let text = serde_json::to_string_pretty(&payload)? + "\n";
-    super::rundir::write_atomic(&directory.join("config.json"), text.as_bytes())
+    super::rundir::write_atomic(&directory.join(CONFIG_FILE), text.as_bytes())
 }
+
+/// Reads entry `key` of the settings that [`write_config`] stored in
+/// `directory`.
+///
+/// # Errors
+///
+/// If `config.json` is missing or unreadable, or the entry does not
+/// deserialize as `T`.
+pub fn read_settings<T: serde::de::DeserializeOwned>(
+    directory: &Path,
+    key: &str,
+) -> anyhow::Result<T> {
+    let path = directory.join(CONFIG_FILE);
+    let config: Value = super::rundir::read_json(&path)?;
+    serde_json::from_value(config["settings"][key].clone())
+        .with_context(|| format!("settings.{key} of {}", path.display()))
+}
+
+/// The file name of a run's configuration.
+pub const CONFIG_FILE: &str = "config.json";

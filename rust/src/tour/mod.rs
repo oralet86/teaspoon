@@ -93,13 +93,6 @@ pub struct Replay {
     delta: i64,
 }
 
-impl Replay {
-    /// Whether the application changed nothing.
-    pub fn is_empty(&self) -> bool {
-        self.steps.is_empty()
-    }
-}
-
 /// A point in the undo log to return to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mark {

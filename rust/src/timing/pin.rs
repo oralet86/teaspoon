@@ -14,7 +14,7 @@ const TOPOLOGY: &str = "/sys/devices/system/cpu";
 /// # Errors
 ///
 /// If the affinity mask cannot be read.
-pub fn allowed_cpus() -> anyhow::Result<Vec<usize>> {
+fn allowed_cpus() -> anyhow::Result<Vec<usize>> {
     use nix::sched::{CpuSet, sched_getaffinity};
     use nix::unistd::Pid;
     let set = sched_getaffinity(Pid::from_raw(0)).context("sched_getaffinity")?;
@@ -85,7 +85,7 @@ pub fn physical_cores() -> anyhow::Result<Vec<usize>> {
 /// # Errors
 ///
 /// If the file cannot be read or its header names no CPU.
-pub fn interrupts_per_cpu() -> anyhow::Result<std::collections::BTreeMap<usize, u64>> {
+fn interrupts_per_cpu() -> anyhow::Result<std::collections::BTreeMap<usize, u64>> {
     let text = std::fs::read_to_string("/proc/interrupts").context("reading /proc/interrupts")?;
     let mut lines = text.lines();
     let cpus: Vec<usize> = lines

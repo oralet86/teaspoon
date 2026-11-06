@@ -296,7 +296,7 @@ fn local_optima_have_no_improving_application() {
         let order = fixture.random_order(21);
         let mut tour: Tour<Array> = Tour::new(&order, &fixture.matrix);
         let all: Vec<City> = (0..n as City).collect();
-        descend(&mut tour, &problem, &mut Work::default(), &all, None);
+        descend(&mut tour, &problem, &mut Work::default(), &all);
         assert_eq!(
             improving_nl_two_opt(&tour, &fixture.matrix, &fixture.neighbours),
             None
@@ -402,9 +402,8 @@ fn replays_match_on_any_thread_in_any_order() {
 fn operator_names_round_trip() {
     for op in Op::ALL {
         assert_eq!(Op::from_name(op.name()), Some(op));
+        assert_eq!(Op::parse_current(op.name()).unwrap(), op);
     }
-    assert_eq!(Op::LkKick.id(), "O21");
-    assert_eq!(Op::ALL.iter().filter(|op| op.deterministic()).count(), 8);
 }
 
 #[test]
@@ -417,13 +416,15 @@ fn retirement_keeps_protocol_ids_and_skips_retired_names() {
         expected.map(|number| format!("O{number}")).to_vec(),
         "protocol ids moved"
     );
-    for (position, op) in Op::ALL.into_iter().enumerate() {
-        assert_eq!(op.index(), position);
-    }
     for name in aos::ops::RETIRED {
         assert!(Op::from_name(name).is_none(), "{name} is still an operator");
         assert!(Op::parse_stored(name).unwrap().is_none());
+        assert!(
+            Op::parse_current(name).is_err(),
+            "{name} accepted as current"
+        );
     }
     assert_eq!(Op::parse_stored("swap").unwrap(), Some(Op::Swap));
     assert!(Op::parse_stored("no_such_operator").is_err());
+    assert!(Op::parse_current("no_such_operator").is_err());
 }

@@ -24,37 +24,33 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::common::{CLASSES, Implementation, Job, dispatch, load_instance, tour_of};
-use super::marginal::classify;
+use super::common::{CLASSES, Implementation, InstanceCache, Job, dispatch};
+use super::marginal::{classify, read_cells};
 use crate::City;
 use crate::instance::Instance;
 use crate::instance::storage::Dist;
-use crate::io::parquet::{
-    Column, Table, column_f64, column_str, has_part, merge_parts, read, write_part,
-};
+use crate::io::parquet::{Column, Table, has_part, has_parts, merge_parts, write_part};
 use crate::io::provenance::write_config;
 use crate::io::rundir::write_atomic;
 use crate::ops::{Op, Problem, Work};
 use crate::rng::Stream;
-use crate::timing::machine;
-use crate::timing::pin;
+use crate::timing::session::{CoreRoles, TimedSession};
 use crate::timing::tsc::{self, Clock};
 use crate::tour::{Layout, Tour};
 
 /// Default share of probability the adaptive arms' floors hold together.
-pub const FLOOR_SHARE: f64 = 0.2;
+const FLOOR_SHARE: f64 = 0.2;
 
 /// How an arm is specified on the command line.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ArmSpec {
     /// Always one operator.
-    Fixed(String),
+    Fixed(Op),
     /// Uniform over all operators.
     Uniform,
     /// Probability matching on the slice's gain per second.
@@ -75,12 +71,7 @@ impl ArmSpec {
     /// On an unknown arm or operator, or a non-positive temperature.
     pub fn parse(text: &str) -> anyhow::Result<Self> {
         Ok(match text.split_once(':') {
-            Some(("fixed", name)) => {
-                if Op::parse_stored(name)?.is_none() {
-                    bail!("operator {name} was retired on 2026-11-05");
-                }
-                Self::Fixed(name.to_string())
-            }
+            Some(("fixed", name)) => Self::Fixed(Op::parse_current(name)?),
             Some(("softmax", tau)) => {
                 let tau: f64 = tau.parse().context("softmax temperature")?;
                 if tau <= 0.0 {
@@ -99,7 +90,7 @@ impl ArmSpec {
     /// Name used in file names and tables.
     pub fn label(&self) -> String {
         match self {
-            Self::Fixed(name) => format!("fixed-{name}"),
+            Self::Fixed(op) => format!("fixed-{}", op.name()),
             Self::Uniform => "uniform".into(),
             Self::ProbabilityMatching => "pm".into(),
             Self::AdaptivePursuit => "ap".into(),
@@ -168,7 +159,7 @@ impl Arm {
     fn new(spec: &ArmSpec, table: Option<&Vec<Vec<f64>>>) -> anyhow::Result<Self> {
         let count = Op::ALL.len() as f64;
         Ok(match spec {
-            ArmSpec::Fixed(name) => Self::Fixed(Op::from_name(name).context("operator")?),
+            ArmSpec::Fixed(op) => Self::Fixed(*op),
             ArmSpec::Uniform => Self::Uniform,
             ArmSpec::ProbabilityMatching => Self::Matching {
                 quality: vec![0.0; Op::ALL.len()],
@@ -396,8 +387,8 @@ fn run_slice<D: Dist, const C: bool, L: Layout>(
             finished = tsc::stop();
         }
         (None, Some(seconds)) => {
-            let deadline = started + (seconds * 1e9 * clock.ticks_per_ns) as u64;
-            let interval = DEADLINE_CHECK_NS * clock.ticks_per_ns;
+            let deadline = started + clock.ticks(seconds * 1e9) as u64;
+            let interval = clock.ticks(DEADLINE_CHECK_NS);
             // Reading the clock costs about as much as a cheap application,
             // and that cost would be charged to the operator; so the
             // deadline is checked every `ahead` applications, set from the
@@ -449,7 +440,7 @@ impl Job for PopulationJob<'_> {
             .map(|_| {
                 let mut order: Vec<City> = (0..n as City).collect();
                 init.shuffle(&mut order);
-                tour_of::<L>(instance, &order)
+                Tour::<L>::new(&order, &instance.matrix)
             })
             .collect();
         let mut lengths: Vec<i64> = population.iter().map(Tour::length).collect();
@@ -559,7 +550,7 @@ impl Job for PopulationJob<'_> {
 ///
 /// If the configuration is invalid or a level arm has no rate table.
 #[allow(clippy::too_many_arguments)]
-pub fn run_population(
+fn run_population(
     instance: &Instance,
     implementation: &Implementation,
     spec: &ArmSpec,
@@ -631,29 +622,22 @@ pub fn replay(
 /// # Errors
 ///
 /// If the cells table cannot be read.
-pub fn rate_table(cells: &Path, instance: &str) -> anyhow::Result<Vec<Vec<f64>>> {
-    let batch = read(cells)?;
-    let (names, classes, operators, rates) = (
-        column_str(&batch, "instance")?,
-        column_str(&batch, "class")?,
-        column_str(&batch, "operator")?,
-        column_f64(&batch, "rate")?,
-    );
+fn rate_table(cells: &Path, instance: &str) -> anyhow::Result<Vec<Vec<f64>>> {
     let mut own: HashMap<(usize, usize), Vec<f64>> = HashMap::new();
     let mut all: HashMap<(usize, usize), Vec<f64>> = HashMap::new();
-    for row in 0..names.len() {
+    for cell in read_cells(cells)? {
         let class = CLASSES
             .iter()
-            .position(|label| *label == classes[row])
+            .position(|label| *label == cell.class)
             .context("unknown class")?;
         // Measurements made before 2026-11-05 still hold the retired operators.
-        let Some(op) = Op::parse_stored(&operators[row])? else {
+        let Some(op) = Op::parse_stored(&cell.operator)? else {
             continue;
         };
         let op = op.index();
-        all.entry((class, op)).or_default().push(rates[row]);
-        if names[row] == instance {
-            own.entry((class, op)).or_default().push(rates[row]);
+        all.entry((class, op)).or_default().push(cell.rate);
+        if cell.instance == instance {
+            own.entry((class, op)).or_default().push(cell.rate);
         }
     }
     Ok((0..CLASSES.len())
@@ -708,23 +692,15 @@ pub fn run(
 ) -> anyhow::Result<()> {
     settings.config.validate()?;
     std::fs::create_dir_all(directory)?;
-    let cores = pin::physical_cores()?;
-    if workers + 1 > cores.len() {
-        bail!(
-            "{workers} timed workers need {} physical cores",
-            workers + 1
-        );
-    }
-    let problems = machine::require_locked(&cores, allow_unlocked)?;
-    pin::pin_current_thread(*cores.last().expect("cores"))?;
-    let clock = Clock::calibrate(5, 200)?;
+    let session = TimedSession::open(CoreRoles::workers(workers)?, allow_unlocked)?;
+    let clock = &session.clock;
     write_config(
         directory,
         repository,
         json!({
             "experiment": "population runs",
             "population": settings,
-            "machine_problems": problems,
+            "machine_problems": session.problems,
             "clock": clock,
             "timed_workers": workers,
         }),
@@ -737,102 +713,68 @@ pub fn run(
             }
         }
     }
-    let next = AtomicUsize::new(0);
-    let errors: Mutex<Vec<anyhow::Error>> = Mutex::new(Vec::new());
     let summaries: Mutex<Vec<(String, String, u64, RunResult)>> = Mutex::new(Vec::new());
     let tables: Mutex<HashMap<String, Vec<Vec<f64>>>> = Mutex::new(HashMap::new());
-    std::thread::scope(|scope| {
-        for &cpu in &cores[..workers] {
-            let (jobs, next, errors, summaries, tables, clock) =
-                (&jobs, &next, &errors, &summaries, &tables, &clock);
-            scope.spawn(move || {
-                let result = (|| -> anyhow::Result<()> {
-                    pin::pin_current_thread(cpu)?;
-                    let mut cached: Option<(String, Instance)> = None;
-                    while errors.lock().expect("lock").is_empty() {
-                        let index = next.fetch_add(1, Ordering::Relaxed);
-                        let Some((path, arm, seed)) = jobs.get(index) else {
-                            return Ok(());
-                        };
-                        if cached
-                            .as_ref()
-                            .is_none_or(|(cached_path, _)| cached_path != path)
-                        {
-                            cached = Some((path.clone(), load_instance(repository, path)?));
-                        }
-                        let instance = &cached.as_ref().expect("loaded").1;
-                        let key = format!("{}_{}_{seed}", instance.name, arm.label());
-                        if has_part(directory, "runs", &key) {
-                            continue;
-                        }
-                        let table = match (&settings.rates, arm.needs_class()) {
-                            (Some(cells), true) => {
-                                let mut tables = tables.lock().expect("lock");
-                                if !tables.contains_key(&instance.name) {
-                                    let cells = repository.join(cells);
-                                    tables.insert(
-                                        instance.name.clone(),
-                                        rate_table(&cells, &instance.name)?,
-                                    );
-                                }
-                                Some(tables[&instance.name].clone())
-                            }
-                            _ => None,
-                        };
-                        let result = run_population(
-                            instance,
-                            &settings.implementation,
-                            arm,
-                            table.as_ref(),
-                            &settings.config,
-                            *seed,
-                            clock,
-                        )
-                        .with_context(|| key.clone())?;
-                        if settings.check_replay {
-                            let again = replay(
-                                instance,
-                                &settings.implementation,
-                                &result.log,
-                                &settings.config,
-                                *seed,
-                                clock,
-                            )?;
-                            if again.best_length != result.best_length
-                                || again.best_hash != result.best_hash
-                            {
-                                bail!("{key}: count-mode replay reached another best tour");
-                            }
-                        }
-                        write_slices(directory, &key, &instance.name, arm, *seed, &result)?;
-                        log::info!(
-                            "{key}: best {} after {} slices, {:.1} s",
-                            result.best_length,
-                            result.log.operator.len(),
-                            result.elapsed_seconds
-                        );
-                        summaries.lock().expect("lock").push((
-                            instance.name.clone(),
-                            arm.label(),
-                            *seed,
-                            result,
-                        ));
+    session.run_pinned(
+        &jobs,
+        |_| Ok(InstanceCache::default()),
+        |instances, _, (path, arm, seed)| {
+            let instance = instances.get(repository, path)?;
+            let key = format!("{}_{}_{seed}", instance.name, arm.label());
+            if has_part(directory, "runs", &key) {
+                return Ok(());
+            }
+            let table = match (&settings.rates, arm.needs_class()) {
+                (Some(cells), true) => {
+                    let mut tables = tables.lock().expect("lock");
+                    if !tables.contains_key(&instance.name) {
+                        let cells = repository.join(cells);
+                        tables.insert(instance.name.clone(), rate_table(&cells, &instance.name)?);
                     }
-                    Ok(())
-                })();
-                if let Err(error) = result {
-                    errors.lock().expect("lock").push(error);
+                    Some(tables[&instance.name].clone())
                 }
-            });
-        }
-    });
-    if let Some(error) = errors.into_inner().expect("finished").into_iter().next() {
-        return Err(error);
-    }
-    if !std::fs::read_dir(directory.join("runs.parts"))
-        .map(|mut entries| entries.next().is_none())
-        .unwrap_or(true)
-    {
+                _ => None,
+            };
+            let result = run_population(
+                &instance,
+                &settings.implementation,
+                arm,
+                table.as_ref(),
+                &settings.config,
+                *seed,
+                clock,
+            )
+            .with_context(|| key.clone())?;
+            if settings.check_replay {
+                let again = replay(
+                    &instance,
+                    &settings.implementation,
+                    &result.log,
+                    &settings.config,
+                    *seed,
+                    clock,
+                )?;
+                if again.best_length != result.best_length || again.best_hash != result.best_hash {
+                    bail!("{key}: count-mode replay reached another best tour");
+                }
+            }
+            write_slices(directory, &key, &instance.name, arm, *seed, &result)?;
+            log::info!(
+                "{key}: best {} after {} slices, {:.1} s",
+                result.best_length,
+                result.log.operator.len(),
+                result.elapsed_seconds
+            );
+            summaries.lock().expect("lock").push((
+                instance.name.clone(),
+                arm.label(),
+                *seed,
+                result,
+            ));
+            Ok(())
+        },
+    )?;
+    if has_parts(directory, "runs")? {
         merge_parts(directory, "runs")?;
     }
     let summaries = summaries.into_inner().expect("finished");

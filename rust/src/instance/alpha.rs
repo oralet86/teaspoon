@@ -63,14 +63,18 @@ fn weight(dist: &impl Dist, pi: &[f64], i: usize, j: usize) -> f64 {
     (f64::from(dist.d(i as City, j as City)) + pi[i]) + pi[j]
 }
 
+/// The special city of every 1-tree (as in LKH): left out of the spanning
+/// tree and joined by its two cheapest edges.
+const SPECIAL: usize = 0;
+
 /// Minimum 1-tree: Prim's minimum spanning tree on every city but
-/// `special`, plus the two cheapest edges at `special`.
-fn minimum_one_tree(dist: &impl Dist, pi: &[f64], special: usize) -> OneTree {
+/// [`SPECIAL`], plus the two cheapest edges at it.
+fn minimum_one_tree(dist: &impl Dist, pi: &[f64]) -> OneTree {
     let n = dist.n();
-    let root = if special == 0 { 1 } else { 0 };
+    let root = SPECIAL + 1;
     let mut parent = vec![NONE; n];
     let mut in_tree = vec![false; n];
-    in_tree[special] = true;
+    in_tree[SPECIAL] = true;
     in_tree[root] = true;
     let mut best: Vec<f64> = (0..n)
         .map(|j| {
@@ -114,9 +118,9 @@ fn minimum_one_tree(dist: &impl Dist, pi: &[f64], special: usize) -> OneTree {
             }
         }
     }
-    let (first, second) = two_smallest(dist, pi, special);
+    let (first, second) = two_smallest(dist, pi, SPECIAL);
     total += first.1 + second.1;
-    degree[special] = 2;
+    degree[SPECIAL] = 2;
     degree[first.0] += 1;
     degree[second.0] += 1;
     OneTree {
@@ -167,7 +171,7 @@ pub fn ascend(dist: &impl Dist, settings: AscentSettings) -> Vec<f64> {
         while position < period {
             position += 1;
             iteration += 1;
-            let tree = minimum_one_tree(dist, &pi, 0);
+            let tree = minimum_one_tree(dist, &pi);
             let bound = tree.total - 2.0 * pi.iter().sum::<f64>();
             let v: Vec<f64> = tree.degree.iter().map(|&d| (d - 2) as f64).collect();
             if bound > best_bound + 1e-9 {
@@ -221,7 +225,7 @@ fn best_k(alpha: &[f64], distances: &[i32], k: usize) -> Vec<City> {
 /// of `aos.candidates.alpha_candidates`).
 pub fn alpha_candidates(dist: &impl Dist, pi: &[f64], k: usize) -> Vec<Vec<City>> {
     let n = dist.n();
-    let tree = minimum_one_tree(dist, pi, 0);
+    let tree = minimum_one_tree(dist, pi);
     let root = tree.order[0] as usize;
     let edge_weight: Vec<f64> = (0..n)
         .map(|city| match tree.parent[city] {
@@ -229,7 +233,7 @@ pub fn alpha_candidates(dist: &impl Dist, pi: &[f64], k: usize) -> Vec<Vec<City>
             parent => weight(dist, pi, city, parent as usize),
         })
         .collect();
-    let second_at_special = two_smallest(dist, pi, 0).1.1;
+    let second_at_special = two_smallest(dist, pi, SPECIAL).1.1;
     let mut candidates = vec![Vec::new(); n];
     let mut beta = vec![0.0; n];
     let mut mark = vec![NONE as usize; n];
@@ -256,15 +260,15 @@ pub fn alpha_candidates(dist: &impl Dist, pi: &[f64], k: usize) -> Vec<Vec<City>
             row_distances[j] = dist.d(i as City, j as City);
         }
         alpha[i] = f64::INFINITY;
-        alpha[0] = (weight(dist, pi, i, 0) - second_at_special).max(0.0);
+        alpha[SPECIAL] = (weight(dist, pi, i, SPECIAL) - second_at_special).max(0.0);
         candidates[i] = best_k(&alpha, &row_distances, k);
     }
     for j in 0..n {
-        alpha[j] = (weight(dist, pi, 0, j) - second_at_special).max(0.0);
-        row_distances[j] = dist.d(0, j as City);
+        alpha[j] = (weight(dist, pi, SPECIAL, j) - second_at_special).max(0.0);
+        row_distances[j] = dist.d(SPECIAL as City, j as City);
     }
-    alpha[0] = f64::INFINITY;
-    candidates[0] = best_k(&alpha, &row_distances, k);
+    alpha[SPECIAL] = f64::INFINITY;
+    candidates[SPECIAL] = best_k(&alpha, &row_distances, k);
     candidates
 }
 
@@ -291,7 +295,7 @@ struct CacheFile {
 pub const CACHE_DIRECTORY: &str = "data/cache/candidates-rs";
 
 /// The cache file of instance `name`.
-pub fn cache_path(cache: &Path, name: &str, k: usize) -> PathBuf {
+fn cache_path(cache: &Path, name: &str, k: usize) -> PathBuf {
     cache.join(format!("{name}-alpha{k}.json"))
 }
 

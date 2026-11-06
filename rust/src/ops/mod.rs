@@ -24,9 +24,10 @@ mod three_opt;
 mod two_opt;
 
 pub use kicks::double_bridge_move;
-pub use two_opt::{descend, improve_city};
+pub use two_opt::{descend, descend_until, improve_city};
 
 use crate::City;
+use crate::instance::Instance;
 use crate::instance::neighbours::CandidateLists;
 use crate::instance::storage::Dist;
 use crate::rng::Stream;
@@ -41,7 +42,9 @@ pub struct Work {
     pub cache_reads: u64,
     /// Storage positions rewritten by tour changes.
     pub positions: u64,
-    /// Path reversals (2-opt flips) applied, including undone ones.
+    /// Path reversals (2-opt flips) applied, including those later undone.
+    /// Undoing adds positions only, except an LK backtrack, which also
+    /// counts one flip (Python's explicit inverse exchange).
     pub flips: u64,
 }
 
@@ -71,10 +74,14 @@ pub struct Problem<'a, D: Dist, const CACHE: bool> {
 }
 
 impl<'a, D: Dist, const CACHE: bool> Problem<'a, D, CACHE> {
-    /// Number of cities.
-    #[inline(always)]
-    pub fn n(&self) -> usize {
-        self.dist.n()
+    /// The operators' view of `instance`, reading distances from `dist`
+    /// (its matrix or its coordinates).
+    pub fn new(dist: &'a D, instance: &'a Instance) -> Self {
+        Self {
+            dist,
+            neighbours: &instance.neighbours,
+            alpha: instance.alpha.as_ref(),
+        }
     }
 
     /// Distance between `i` and `j`, read from the storage.
@@ -107,12 +114,18 @@ impl<'a, D: Dist, const CACHE: bool> Problem<'a, D, CACHE> {
     ///
     /// # Panics
     ///
-    /// If none are attached; experiments check [`Op::available`] for every
-    /// operator before the first application.
+    /// If none are attached: O17 and O18 need them, and every experiment
+    /// loads its instances with alpha candidates.
     #[inline(always)]
     pub fn alpha_lists(&self) -> &'a CandidateLists {
-        self.alpha
-            .expect("alpha candidates are attached (checked by Op::available)")
+        self.alpha.expect("alpha candidates are attached")
+    }
+
+    /// The lists of the Lin-Kernighan step [`Op::lin_kernighan_for`]
+    /// chooses: the alpha candidates when attached, else the neighbours.
+    #[inline(always)]
+    pub fn lin_kernighan_lists(&self) -> &'a CandidateLists {
+        self.alpha.unwrap_or(self.neighbours)
     }
 }
 
@@ -154,6 +167,44 @@ fn exchange<L: Layout>(
         reverse(tour, work, x2, y1);
     } else {
         reverse(tour, work, y1, x2);
+    }
+}
+
+/// Cities waiting for a local search, each queued at most once
+/// (don't-look bits, Bentley 1992): a city leaves when its search fails
+/// and re-enters when a move touches it.
+struct WorkQueue {
+    queue: std::collections::VecDeque<City>,
+    queued: Vec<bool>,
+}
+
+impl WorkQueue {
+    /// A queue over `n` cities holding `start` in order (duplicates once).
+    fn new(n: usize, start: impl IntoIterator<Item = City>) -> Self {
+        let mut queue = Self {
+            queue: std::collections::VecDeque::new(),
+            queued: vec![false; n],
+        };
+        queue.extend(start);
+        queue
+    }
+
+    /// Queues every city of `cities` that is not queued yet.
+    #[inline]
+    fn extend(&mut self, cities: impl IntoIterator<Item = City>) {
+        for city in cities {
+            if !std::mem::replace(&mut self.queued[city as usize], true) {
+                self.queue.push_back(city);
+            }
+        }
+    }
+
+    /// The next city to search.
+    #[inline]
+    fn pop(&mut self) -> Option<City> {
+        let city = self.queue.pop_front()?;
+        self.queued[city as usize] = false;
+        Some(city)
     }
 }
 
@@ -220,52 +271,118 @@ pub const RETIRED: [&str; 5] = [
     "segment_exchange",
 ];
 
+/// Operators are stored by name (in settings files, for example).
+impl serde::Serialize for Op {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.name())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Op {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = <std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
+        Op::parse_current(&name).map_err(serde::de::Error::custom)
+    }
+}
+
+/// What the protocol records about one operator.
+#[derive(Debug, Clone, Copy)]
+pub struct OpInfo {
+    /// The operator.
+    pub op: Op,
+    /// The name used in `aos/operators.py` and in every output table.
+    pub name: &'static str,
+    /// Whether an application is fully determined by the anchor
+    /// (`aos.operators.DETERMINISTIC`).
+    pub deterministic: bool,
+    /// Operator family (`aos.operators.FAMILIES`; O21 joins the kicks).
+    pub family: &'static str,
+}
+
+const fn info(op: Op, name: &'static str, deterministic: bool, family: &'static str) -> OpInfo {
+    OpInfo {
+        op,
+        name,
+        deterministic,
+        family,
+    }
+}
+
+/// Every operator in protocol order: the one place its facts are written.
+pub const OPERATORS: [OpInfo; 16] = [
+    info(Op::Swap, "swap", false, "swap"),
+    info(Op::TwoOptFirst, "two_opt_first", true, "two_opt"),
+    info(Op::TwoOptNl, "two_opt_nl", true, "two_opt"),
+    info(Op::Kick, "kick", false, "kick"),
+    info(Op::OrOptNl, "or_opt_nl", true, "or_opt_nl"),
+    info(Op::ThreeOptNl, "three_opt_nl", true, "three_opt_nl"),
+    info(Op::RuinRecreate, "ruin_recreate", false, "ruin_recreate"),
+    info(Op::DoubleBridge, "double_bridge", false, "kick"),
+    info(Op::DoubleBridgeLocal, "double_bridge_local", false, "kick"),
+    info(Op::TwoOptDescent, "two_opt_descent", true, "two_opt"),
+    info(Op::TwoOptTargeted, "two_opt_targeted", false, "two_opt"),
+    info(Op::LinKernighan, "lin_kernighan", true, "lin_kernighan"),
+    info(Op::TwoOptAlpha, "two_opt_alpha", true, "two_opt_alpha"),
+    info(
+        Op::LinKernighanAlpha,
+        "lin_kernighan_alpha",
+        true,
+        "lin_kernighan_alpha",
+    ),
+    info(Op::StringRemoval, "string_removal", false, "string_removal"),
+    info(Op::LkKick, "lk_kick", false, "kick"),
+];
+
+/// One past the largest discriminant.
+const PROTOCOL_SLOTS: usize = 21;
+
+/// Position in [`OPERATORS`] of every discriminant; `u8::MAX` for the
+/// retired gaps.  Building it checks at compile time that the table is in
+/// protocol order and names every operator once.
+const POSITIONS: [u8; PROTOCOL_SLOTS] = {
+    let mut positions = [u8::MAX; PROTOCOL_SLOTS];
+    let mut index = 0;
+    while index < OPERATORS.len() {
+        let slot = OPERATORS[index].op as usize;
+        assert!(positions[slot] == u8::MAX, "an operator is listed twice");
+        assert!(
+            index == 0 || slot > OPERATORS[index - 1].op as usize,
+            "OPERATORS is not in protocol order"
+        );
+        positions[slot] = index as u8;
+        index += 1;
+    }
+    positions
+};
+
 impl Op {
     /// Every operator in protocol order.
-    pub const ALL: [Op; 16] = [
-        Op::Swap,
-        Op::TwoOptFirst,
-        Op::TwoOptNl,
-        Op::Kick,
-        Op::OrOptNl,
-        Op::ThreeOptNl,
-        Op::RuinRecreate,
-        Op::DoubleBridge,
-        Op::DoubleBridgeLocal,
-        Op::TwoOptDescent,
-        Op::TwoOptTargeted,
-        Op::LinKernighan,
-        Op::TwoOptAlpha,
-        Op::LinKernighanAlpha,
-        Op::StringRemoval,
-        Op::LkKick,
-    ];
+    pub const ALL: [Op; OPERATORS.len()] = {
+        let mut all = [Op::Swap; OPERATORS.len()];
+        let mut index = 0;
+        while index < OPERATORS.len() {
+            all[index] = OPERATORS[index].op;
+            index += 1;
+        }
+        all
+    };
+
+    /// The operator's entry in [`OPERATORS`].
+    pub fn info(self) -> &'static OpInfo {
+        &OPERATORS[self.index()]
+    }
 
     /// The name used in `aos/operators.py` and in every output table.
     pub fn name(self) -> &'static str {
-        match self {
-            Op::Swap => "swap",
-            Op::TwoOptFirst => "two_opt_first",
-            Op::TwoOptNl => "two_opt_nl",
-            Op::Kick => "kick",
-            Op::OrOptNl => "or_opt_nl",
-            Op::ThreeOptNl => "three_opt_nl",
-            Op::RuinRecreate => "ruin_recreate",
-            Op::DoubleBridge => "double_bridge",
-            Op::DoubleBridgeLocal => "double_bridge_local",
-            Op::TwoOptDescent => "two_opt_descent",
-            Op::TwoOptTargeted => "two_opt_targeted",
-            Op::LinKernighan => "lin_kernighan",
-            Op::TwoOptAlpha => "two_opt_alpha",
-            Op::LinKernighanAlpha => "lin_kernighan_alpha",
-            Op::StringRemoval => "string_removal",
-            Op::LkKick => "lk_kick",
-        }
+        self.info().name
     }
 
     /// The operator called `name`.
     pub fn from_name(name: &str) -> Option<Op> {
-        Op::ALL.into_iter().find(|op| op.name() == name)
+        OPERATORS
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.op)
     }
 
     /// The operator called `name` in a stored table: `None` for a retired
@@ -282,13 +399,23 @@ impl Op {
         }
     }
 
+    /// The operator called `name` where a current operator is required
+    /// (command lines, plans).
+    ///
+    /// # Errors
+    ///
+    /// If `name` is unknown or names an operator retired on 2026-11-05
+    /// (see [`RETIRED`]).
+    pub fn parse_current(name: &str) -> anyhow::Result<Op> {
+        Op::parse_stored(name)?.ok_or_else(|| {
+            anyhow::anyhow!("operator {name} was retired on 2026-11-05; it needs an earlier build")
+        })
+    }
+
     /// Position in [`Op::ALL`], for per-operator arrays of length
     /// `Op::ALL.len()`.
     pub fn index(self) -> usize {
-        Op::ALL
-            .iter()
-            .position(|&op| op == self)
-            .expect("every operator is in Op::ALL")
+        usize::from(POSITIONS[self as usize])
     }
 
     /// Protocol identifier (`O1`, `O5`, …, `O21`), stable across the
@@ -297,35 +424,24 @@ impl Op {
         format!("O{}", self as usize + 1)
     }
 
-    /// Whether the application is fully determined by the anchor
-    /// (`aos.operators.DETERMINISTIC`).
+    /// Whether the application is fully determined by the anchor.
     pub fn deterministic(self) -> bool {
-        matches!(
-            self,
-            Op::TwoOptFirst
-                | Op::TwoOptNl
-                | Op::OrOptNl
-                | Op::ThreeOptNl
-                | Op::TwoOptDescent
-                | Op::LinKernighan
-                | Op::TwoOptAlpha
-                | Op::LinKernighanAlpha
-        )
+        self.info().deterministic
     }
 
-    /// Operator family (`aos.operators.FAMILIES`; O21 joins the kicks).
+    /// Operator family.
     pub fn family(self) -> &'static str {
-        match self {
-            Op::TwoOptFirst | Op::TwoOptNl | Op::TwoOptDescent | Op::TwoOptTargeted => "two_opt",
-            Op::Kick | Op::DoubleBridge | Op::DoubleBridgeLocal | Op::LkKick => "kick",
-            other => other.name(),
-        }
+        self.info().family
     }
 
-    /// Whether the operator can run on `problem` (O17 and O18 need alpha
-    /// candidates; O21 falls back to O16 without them).
-    pub fn available<D: Dist, const CACHE: bool>(self, problem: &Problem<'_, D, CACHE>) -> bool {
-        !matches!(self, Op::TwoOptAlpha | Op::LinKernighanAlpha) || problem.alpha.is_some()
+    /// The Lin-Kernighan step of `problem`: O18 over the alpha candidates
+    /// when they are attached, else O16 over the neighbour lists.
+    pub fn lin_kernighan_for<D: Dist, const CACHE: bool>(problem: &Problem<'_, D, CACHE>) -> Op {
+        if problem.alpha.is_some() {
+            Op::LinKernighanAlpha
+        } else {
+            Op::LinKernighan
+        }
     }
 
     /// Applies the operator once (see the module documentation).

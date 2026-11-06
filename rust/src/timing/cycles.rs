@@ -90,13 +90,91 @@ impl ThreadCounters {
     /// If a counter cannot be read or the loop did not run.
     pub fn reference_khz(&mut self, ms: u64) -> anyhow::Result<f64> {
         let before = self.read()?;
-        let until = super::tsc::monotonic_raw_ns() + ms * 1_000_000;
-        while super::tsc::monotonic_raw_ns() < until {
+        let until = super::monotonic_raw_ns() + ms * 1_000_000;
+        while super::monotonic_raw_ns() < until {
             std::hint::spin_loop();
         }
         self.read()?
             .khz_since(&before)
             .context("the reference loop did not run")
+    }
+}
+
+/// Largest allowed change of the measured core frequency within a timed
+/// block, as a fraction.
+pub const FREQUENCY_DRIFT: f64 = 0.01;
+
+/// Length of the busy loop that measures a thread's reference frequency
+/// (ms).
+const REFERENCE_MS: u64 = 200;
+
+/// The calling thread's core-cycle counters and the reference frequency
+/// measured with them, for checking that timed blocks ran at it.
+pub struct FrequencyWatch {
+    counters: Option<ThreadCounters>,
+    /// The frequency of a [`REFERENCE_MS`] busy loop on this thread (kHz).
+    pub reference_khz: Option<f64>,
+}
+
+impl FrequencyWatch {
+    /// Opens the counters on the calling thread and measures its reference
+    /// frequency.  Without counters the watch reports nothing, which only
+    /// `allow_unlocked` permits (their absence is then a recorded machine
+    /// problem).
+    ///
+    /// # Errors
+    ///
+    /// If the counters cannot be opened and `allow_unlocked` is not set, or
+    /// a reading fails.
+    pub fn on_this_thread(allow_unlocked: bool) -> anyhow::Result<Self> {
+        let mut counters = match ThreadCounters::open() {
+            Ok(counters) => Some(counters),
+            Err(error) if allow_unlocked => {
+                log::warn!("no core-cycle counter: {error:#}");
+                None
+            }
+            Err(error) => return Err(error),
+        };
+        let reference_khz = match counters.as_mut() {
+            Some(counters) => Some(counters.reference_khz(REFERENCE_MS)?),
+            None => None,
+        };
+        Ok(Self {
+            counters,
+            reference_khz,
+        })
+    }
+
+    /// The counters now (`None` without counters).
+    ///
+    /// # Errors
+    ///
+    /// If a counter cannot be read.
+    pub fn read(&mut self) -> anyhow::Result<Option<Reading>> {
+        self.counters.as_mut().map(ThreadCounters::read).transpose()
+    }
+
+    /// The average frequency since `before` (kHz), when both are known.
+    ///
+    /// # Errors
+    ///
+    /// If a counter cannot be read.
+    pub fn khz_since(&mut self, before: Option<Reading>) -> anyhow::Result<Option<f64>> {
+        Ok(match (self.read()?, before) {
+            (Some(after), Some(before)) => after.khz_since(&before),
+            _ => None,
+        })
+    }
+
+    /// Whether the block since `before` ran more than [`FREQUENCY_DRIFT`]
+    /// away from the reference frequency.
+    ///
+    /// # Errors
+    ///
+    /// If a counter cannot be read.
+    pub fn drifted_since(&mut self, before: Option<Reading>) -> anyhow::Result<bool> {
+        let average = self.khz_since(before)?;
+        Ok(drifted(self.reference_khz, average, FREQUENCY_DRIFT))
     }
 }
 

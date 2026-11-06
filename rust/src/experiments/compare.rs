@@ -7,44 +7,30 @@
 //! For every state in both: the leader on each side, whether it changed,
 //! whether the class agrees, and the ratio (alternative / main) of the
 //! rates of the main side's three best operators.  A leader that changes
-//! is reported as implementation-dependent ([claims.md] rule).
+//! is reported as implementation-dependent (`ideas/claims.md` rule).
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use anyhow::bail;
 
-use crate::io::parquet::{Column, Table, column_f64, column_i64, column_str, read, write};
+use super::marginal::{rank_by_rate, read_cells};
+use crate::io::parquet::{Column, Table, write};
 use crate::io::rundir::write_atomic;
 
 /// Per (instance, seed, state): class and per-operator rates.
 type Cells = BTreeMap<(String, u32, String), (String, HashMap<String, f64>)>;
 
-fn read_rust(directory: &Path) -> anyhow::Result<Cells> {
-    let batch = read(&directory.join("cells.parquet"))?;
-    let (instance, seed, state, class, operator, rate) = (
-        column_str(&batch, "instance")?,
-        column_i64(&batch, "seed")?,
-        column_str(&batch, "state")?,
-        column_str(&batch, "class")?,
-        column_str(&batch, "operator")?,
-        column_f64(&batch, "rate")?,
-    );
+fn read_measurement(directory: &Path) -> anyhow::Result<Cells> {
     let mut cells = Cells::new();
-    for row in 0..instance.len() {
+    for cell in read_cells(&directory.join("cells.parquet"))? {
         cells
-            .entry((instance[row].clone(), seed[row] as u32, state[row].clone()))
-            .or_insert_with(|| (class[row].clone(), HashMap::new()))
+            .entry((cell.instance, cell.seed, cell.state))
+            .or_insert_with(|| (cell.class, HashMap::new()))
             .1
-            .insert(operator[row].clone(), rate[row]);
+            .insert(cell.operator, cell.rate);
     }
     Ok(cells)
-}
-
-fn leader(rates: &HashMap<String, f64>) -> String {
-    let mut ranked: Vec<(&String, &f64)> = rates.iter().collect();
-    ranked.sort_by(|a, b| b.1.total_cmp(a.1).then(a.0.cmp(b.0)));
-    ranked[0].0.clone()
 }
 
 /// Compares `alternative` against `main` (each a Rust measurement
@@ -55,8 +41,8 @@ fn leader(rates: &HashMap<String, f64>) -> String {
 ///
 /// If an input cannot be read or the two share no state.
 pub fn compare(main: &Path, alternative: &Path, out: &Path) -> anyhow::Result<()> {
-    let main_cells = read_rust(main)?;
-    let other_cells = read_rust(alternative)?;
+    let main_cells = read_measurement(main)?;
+    let other_cells = read_measurement(alternative)?;
     let (mut instance, mut seed, mut state, mut main_leader, mut other_leader) =
         (vec![], vec![], vec![], vec![], vec![]);
     let (mut changed, mut class_main, mut class_other, mut ratios) =
@@ -78,14 +64,14 @@ pub fn compare(main: &Path, alternative: &Path, out: &Path) -> anyhow::Result<()
         if shared.is_empty() {
             continue;
         }
-        let (lead_main, lead_other) = (leader(&shared), leader(&other_shared));
-        let mut top: Vec<(&String, &f64)> = shared.iter().collect();
-        top.sort_by(|a, b| b.1.total_cmp(a.1).then(a.0.cmp(b.0)));
+        let top = rank_by_rate(&shared);
+        let lead_main = top[0].0.to_string();
+        let lead_other = rank_by_rate(&other_shared)[0].0.to_string();
         let text: Vec<String> = top
             .iter()
             .take(3)
-            .map(|(name, rate)| {
-                let ratio = other_shared[*name] / **rate;
+            .map(|&(name, rate)| {
+                let ratio = other_shared[name] / rate;
                 format!("{name}={ratio:.3}")
             })
             .collect();

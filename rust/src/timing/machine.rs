@@ -56,7 +56,7 @@ pub fn governor(cpu: usize) -> Option<String> {
 
 /// The frequency floor and ceiling the governor may use on `cpu` (kHz),
 /// `scaling_min_freq` and `scaling_max_freq`.
-pub fn frequency_limits(cpu: usize) -> (Option<u64>, Option<u64>) {
+fn frequency_limits(cpu: usize) -> (Option<u64>, Option<u64>) {
     let read = |name: &str| {
         read_trimmed(format!("{CPUS}/cpu{cpu}/cpufreq/{name}")).and_then(|value| value.parse().ok())
     };
@@ -69,6 +69,11 @@ pub fn average_khz(cpu: usize) -> Option<u64> {
     read_trimmed(format!("{CPUS}/cpu{cpu}/cpufreq/cpuinfo_avg_freq"))?
         .parse()
         .ok()
+}
+
+/// [`average_khz`] as a float, the form the drift checks compare.
+pub fn average_khz_f64(cpu: usize) -> Option<f64> {
+    average_khz(cpu).map(|value| value as f64)
 }
 
 /// Package temperature in °C from the `k10temp` (AMD) or `coretemp`
@@ -111,7 +116,7 @@ pub fn soc_clock_mhz(clock: &str) -> Option<u32> {
 }
 
 /// The amdgpu power level of the first device that has one.
-pub fn soc_power_level() -> Option<String> {
+fn soc_power_level() -> Option<String> {
     for entry in std::fs::read_dir("/sys/class/drm").ok()?.flatten() {
         if let Some(level) = read_trimmed(
             entry
@@ -126,7 +131,7 @@ pub fn soc_power_level() -> Option<String> {
 
 /// Whether the machine runs on mains power; `None` when no supply reports
 /// (a desktop without a battery counts as mains).
-pub fn on_mains() -> Option<bool> {
+fn on_mains() -> Option<bool> {
     let mut found = None;
     for entry in std::fs::read_dir("/sys/class/power_supply").ok()?.flatten() {
         if read_trimmed(entry.path().join("type")).as_deref() == Some("Mains") {
@@ -169,7 +174,7 @@ impl MachineState {
     /// Reads the state of the CPUs `cpus`.
     pub fn read(cpus: &[usize]) -> Self {
         Self {
-            monotonic_ns: super::tsc::monotonic_raw_ns(),
+            monotonic_ns: super::monotonic_raw_ns(),
             boost: boost(),
             governors: cpus.iter().map(|&cpu| (cpu, governor(cpu))).collect(),
             average_khz: cpus.iter().map(|&cpu| (cpu, average_khz(cpu))).collect(),

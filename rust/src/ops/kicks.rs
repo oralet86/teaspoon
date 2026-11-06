@@ -5,11 +5,9 @@
 //! runs in place, and a trial that does not improve is undone through the
 //! undo log: the logical tour is then exactly what it was.
 
-use std::collections::VecDeque;
-
 use super::lk::lk_step;
 use super::two_opt::descend;
-use super::{Application, Problem, Work, pick_anchor, reverse};
+use super::{Application, Problem, Work, WorkQueue, pick_anchor, reverse};
 use crate::City;
 use crate::instance::storage::Dist;
 use crate::rng::Stream;
@@ -19,15 +17,15 @@ use crate::tour::{Layout, Tour};
 ///
 /// Reading the tour from the anchor's successor as X Y R (R ends with the
 /// anchor), with cuts drawn as in Python, the result is R Y X: three edges
-/// replaced, a pure sequential 3-opt move.  Returns the kick's length change
-/// (already added to the tour) and the six cities at the cut edges.
+/// replaced, a pure sequential 3-opt move.  The length change is added to
+/// the tour; returns the six cities at the cut edges.
 fn segment_kick<D: Dist, const C: bool, L: Layout>(
     tour: &mut Tour<L>,
     problem: &Problem<'_, D, C>,
     rng: &mut Stream,
     work: &mut Work,
     anchor: City,
-) -> (i64, [City; 6]) {
+) -> [City; 6] {
     let n = tour.n();
     let mut cuts = rng.sample(n - 1, 2);
     cuts.sort_unstable();
@@ -48,7 +46,7 @@ fn segment_kick<D: Dist, const C: bool, L: Layout>(
     reverse(tour, work, y_start, y_end);
     reverse(tour, work, x_end, y_start);
     tour.add_length(delta);
-    (delta, [anchor, x_start, x_end, y_start, y_end, r_start])
+    [anchor, x_start, x_end, y_start, y_end, r_start]
 }
 
 /// Keeps the trial since `mark` if the tour got shorter, else undoes it.
@@ -80,8 +78,8 @@ pub(super) fn kick<D: Dist, const C: bool, L: Layout>(
     let city = pick_anchor(tour.n(), rng, anchor);
     let mark = tour.mark();
     let before = tour.length();
-    let (_, touched) = segment_kick(tour, problem, rng, work, city);
-    descend(tour, problem, work, &touched, None);
+    let touched = segment_kick(tour, problem, rng, work, city);
+    descend(tour, problem, work, &touched);
     let delta = keep_if_shorter(tour, work, mark, before);
     Application {
         delta,
@@ -136,7 +134,7 @@ fn double_bridge_trial<D: Dist, const C: bool, L: Layout>(
     let start = [
         cuts[0], cuts[1], cuts[2], cuts[3], ends[0], ends[1], ends[2], ends[3],
     ];
-    descend(tour, problem, work, &start, None);
+    descend(tour, problem, work, &start);
     keep_if_shorter(tour, work, mark, before)
 }
 
@@ -201,29 +199,18 @@ pub(super) fn lk_kick<D: Dist, const C: bool, L: Layout>(
     anchor: Option<City>,
 ) -> Application {
     let city = pick_anchor(tour.n(), rng, anchor);
-    let lists = problem.alpha.unwrap_or(problem.neighbours);
+    let lists = problem.lin_kernighan_lists();
     let mark = tour.mark();
     let before = tour.length();
-    let (_, touched) = segment_kick(tour, problem, rng, work, city);
-    let mut queue: VecDeque<City> = VecDeque::new();
-    let mut queued = vec![false; tour.n()];
-    for city in touched {
-        if !std::mem::replace(&mut queued[city as usize], true) {
-            queue.push_back(city);
-        }
-    }
+    let touched = segment_kick(tour, problem, rng, work, city);
+    let mut queue = WorkQueue::new(tour.n(), touched);
     let mut changed = Vec::new();
-    while let Some(current) = queue.pop_front() {
-        queued[current as usize] = false;
+    while let Some(current) = queue.pop() {
         let step_mark = tour.mark();
         if lk_step(tour, problem, lists, current, work) < 0 {
             changed.clear();
             tour.touched_since(step_mark, &mut changed);
-            for &other in &changed {
-                if !std::mem::replace(&mut queued[other as usize], true) {
-                    queue.push_back(other);
-                }
-            }
+            queue.extend(changed.iter().copied());
         }
     }
     let delta = keep_if_shorter(tour, work, mark, before);

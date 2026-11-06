@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use aos::experiments::{common, e0, marginal, population, rollouts, states};
 use aos::instance::Instance;
 use aos::instance::alpha::CACHE_DIRECTORY;
-use aos::timing::{machine, pin, tsc};
+use aos::timing::{machine, pin, session, tsc};
 
 /// Operator-selection experiments for the symmetric TSP.
 #[derive(Parser)]
@@ -163,7 +163,7 @@ struct MeasureArgs {
     #[arg(long, value_enum, default_value_t = common::LayoutChoice::Auto)]
     layout: common::LayoutChoice,
     /// Size from which `auto` uses the two-level list (from E0-rs).
-    #[arg(long, default_value_t = 1000)]
+    #[arg(long, default_value_t = common::DEFAULT_N_SPLIT)]
     n_split: usize,
     /// Reuse the anchors of this measurement run (robustness factors).
     #[arg(long)]
@@ -252,7 +252,7 @@ enum E1rStage {
 }
 
 fn e1r(repository: &Path, args: E1rArgs) -> anyhow::Result<()> {
-    let directory = resolve(repository, &args.out);
+    let directory = repository.join(&args.out);
     match args.stage {
         E1rStage::Plan => {
             let settings = rollouts::Settings {
@@ -265,17 +265,19 @@ fn e1r(repository: &Path, args: E1rArgs) -> anyhow::Result<()> {
                 repeats: args.repeats,
                 slice_ns_per_city: args.slice_ns_per_city,
                 horizon_slices: args.horizon_slices,
-                fit_seeds: vec![0, 1, 2],
-                check_seed: 3,
-                seed: 0,
-                validate_rollouts: args.validate_rollouts.unwrap_or(24),
+                fit_seeds: rollouts::FIT_SEEDS.to_vec(),
+                check_seed: rollouts::CHECK_SEED,
+                seed: rollouts::PLAN_SEED,
+                validate_rollouts: args
+                    .validate_rollouts
+                    .unwrap_or(rollouts::VALIDATE_ROLLOUTS),
                 calibration_slices: args.calibration_slices,
                 stall_rule: args.stall_rule,
             };
             rollouts::plan(repository, &directory, &settings)
         }
         E1rStage::Calibrate => match args.cost_models_from {
-            Some(source) => rollouts::reuse_calibration(&directory, &resolve(repository, &source)),
+            Some(source) => rollouts::reuse_calibration(&directory, &repository.join(&source)),
             None => rollouts::calibrate(repository, &directory, args.allow_unlocked_clock),
         },
         E1rStage::Run => rollouts::run(repository, &directory, args.workers),
@@ -326,7 +328,7 @@ struct PopulationArgs {
     #[arg(long)]
     rates: Option<String>,
     /// Size from which the two-level list is used (from E0-rs).
-    #[arg(long, default_value_t = 1000)]
+    #[arg(long, default_value_t = common::DEFAULT_N_SPLIT)]
     n_split: usize,
     /// Pinned timed workers (from the E0-rs contention gate).
     #[arg(long, default_value_t = 1)]
@@ -369,7 +371,7 @@ fn population_runs(repository: &Path, args: PopulationArgs) -> anyhow::Result<()
     };
     population::run(
         repository,
-        &resolve(repository, &args.out),
+        &repository.join(&args.out),
         &settings,
         args.timed_workers,
         args.allow_unlocked_clock,
@@ -429,10 +431,10 @@ fn measure(repository: &Path, args: MeasureArgs) -> anyhow::Result<()> {
     };
     settings.anchors_from = args
         .anchors_from
-        .map(|path| resolve(repository, &path).display().to_string());
+        .map(|path| repository.join(&path).display().to_string());
     marginal::run(
         repository,
-        &resolve(repository, &args.out),
+        &repository.join(&args.out),
         &settings,
         args.stage,
         args.gain_workers,
@@ -441,18 +443,10 @@ fn measure(repository: &Path, args: MeasureArgs) -> anyhow::Result<()> {
     )
 }
 
-fn resolve(repository: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        repository.join(path)
-    }
-}
-
 fn instance_info(repository: &Path, paths: &[PathBuf]) -> anyhow::Result<()> {
     let cache = repository.join(CACHE_DIRECTORY);
     for path in paths {
-        let instance = Instance::load(&resolve(repository, path), &cache)?;
+        let instance = Instance::load(&repository.join(path), &cache)?;
         println!(
             "{}\tn={}\toptimum={}\tcoordinates={}\talpha={}",
             instance.name,
@@ -480,7 +474,7 @@ fn instance_info(repository: &Path, paths: &[PathBuf]) -> anyhow::Result<()> {
 fn candidates(repository: &Path, paths: &[PathBuf], workers: Option<usize>) -> anyhow::Result<()> {
     let cache = repository.join(CACHE_DIRECTORY);
     let workers = workers
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from))
+        .unwrap_or_else(common::all_cpus)
         .clamp(1, paths.len());
     let next = AtomicUsize::new(0);
     let errors = Mutex::new(Vec::new());
@@ -491,12 +485,11 @@ fn candidates(repository: &Path, paths: &[PathBuf], workers: Option<usize>) -> a
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     let Some(path) = paths.get(index) else { break };
                     let started = std::time::Instant::now();
-                    let result = Instance::load(&resolve(repository, path), &cache).and_then(
-                        |mut instance| {
+                    let result =
+                        Instance::load(&repository.join(path), &cache).and_then(|mut instance| {
                             let computed = instance.ensure_alpha(&cache)?;
                             Ok((instance.name, computed))
-                        },
-                    );
+                        });
                     match result {
                         Ok((name, true)) => log::info!(
                             "{name}: alpha candidates computed in {:.1} s",
@@ -524,7 +517,8 @@ fn candidates(repository: &Path, paths: &[PathBuf], workers: Option<usize>) -> a
 }
 
 fn clock() -> anyhow::Result<()> {
-    let clock = tsc::Clock::calibrate(5, 200)?;
+    let clock =
+        tsc::Clock::calibrate(session::CALIBRATION_WINDOWS, session::CALIBRATION_WINDOW_MS)?;
     println!("{}", serde_json::to_string_pretty(&clock)?);
     let cores = pin::physical_cores()?;
     println!("physical cores: {cores:?}");
@@ -563,22 +557,18 @@ fn main() -> anyhow::Result<()> {
                 e0::Settings::full()
             };
             if let Some(workers) = contention_workers {
-                anyhow::ensure!(
-                    workers.first() == Some(&1) && workers.last() == Some(&1),
-                    "contention phases must start and end with 1 worker (baseline and drift)"
-                );
                 settings.contention_workers = workers;
             }
             e0::run(
                 &repository,
                 &settings,
                 allow_unlocked_clock,
-                out.map(|path| resolve(&repository, &path)),
+                out.map(|path| repository.join(&path)),
             )
             .map(|_| ())
         }
         Command::E0Gates { run } => {
-            let summary = e0::regate(&resolve(&repository, &run))?;
+            let summary = e0::regate(&repository.join(&run))?;
             println!("{}", serde_json::to_string_pretty(&summary)?);
             Ok(())
         }
@@ -596,7 +586,7 @@ fn main() -> anyhow::Result<()> {
                 single_seed_above,
                 workers,
             },
-            out.map(|path| resolve(&repository, &path)),
+            out.map(|path| repository.join(&path)),
         )
         .map(|directory| log::info!("states written to {}", directory.display())),
         Command::Measure(args) => measure(&repository, args),
@@ -607,12 +597,12 @@ fn main() -> anyhow::Result<()> {
             alternative,
             out,
         } => aos::experiments::compare::compare(
-            &resolve(&repository, &main),
-            &resolve(&repository, &alternative),
-            &resolve(&repository, &out),
+            &repository.join(&main),
+            &repository.join(&alternative),
+            &repository.join(&out),
         ),
         Command::Show { path, columns } => {
-            let batch = aos::io::parquet::read(&resolve(&repository, &path))?;
+            let batch = aos::io::parquet::read(&repository.join(&path))?;
             aos::io::parquet::write_csv(&batch, &columns, &mut std::io::stdout().lock())
         }
     }

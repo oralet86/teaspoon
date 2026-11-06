@@ -90,7 +90,8 @@ struct Counters {
 }
 
 impl Counters {
-    fn open() -> std::io::Result<Self> {
+    /// Both counters of the calling thread, before any overhead is known.
+    fn open_unmeasured() -> std::io::Result<Self> {
         let open = |event: Hardware| -> std::io::Result<Sampler> {
             // Defaults: the calling thread on any CPU, user space only.
             // Pinned, so that the counter is never multiplexed off the PMU
@@ -99,11 +100,15 @@ impl Counters {
             counter.enable()?;
             counter.sampled(0)
         };
-        let mut counters = Self {
+        Ok(Self {
             instructions: open(Hardware::INSTRUCTIONS)?,
             cycles: open(Hardware::CPU_CYCLES)?,
             overhead: Counts::default(),
-        };
+        })
+    }
+
+    fn open() -> std::io::Result<Self> {
+        let mut counters = Self::open_unmeasured()?;
         // Measured once per process, on the first thread that counts, so
         // that every thread removes the same overhead: estimated per
         // thread, it differed by 53 instructions between two threads (E0
@@ -192,5 +197,8 @@ pub fn between(before: Option<Reading>, after: Option<Reading>) -> Option<Counts
 ///
 /// The reason they cannot.
 pub fn check() -> std::io::Result<()> {
-    Counters::open().map(drop)
+    // Opened and read without measuring the overhead, which the first
+    // thread that counts (a pinned timed thread) measures.
+    let counters = Counters::open_unmeasured()?;
+    counters.read().map(drop).ok_or_else(unreadable)
 }

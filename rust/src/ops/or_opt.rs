@@ -27,15 +27,13 @@ pub(super) fn insert_segment<L: Layout>(
     after: City,
     target: City,
     other: City,
-    size: usize,
 ) {
-    // Direction of travel from `first` towards `last`.
     let forward = tour.next(outside) == first;
     if tour.succ_in(target, forward) == other {
         // outside S after .. target other -> outside after .. target S other
         exchange(tour, work, outside, first, target, other);
         exchange(tour, work, outside, target, after, last);
-        if size > 1 {
+        if first != last {
             exchange(tour, work, target, last, first, other);
         }
         return;
@@ -96,7 +94,7 @@ pub(super) fn or_opt_nl<D: Dist, const C: bool, L: Layout>(
                     if delta >= 0 {
                         continue;
                     }
-                    insert_segment(tour, work, outside, city, last, after, target, other, size);
+                    insert_segment(tour, work, outside, city, last, after, target, other);
                     tour.add_length(delta);
                     return Application {
                         delta,

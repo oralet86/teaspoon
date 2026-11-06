@@ -37,13 +37,10 @@ pub fn stop() -> u64 {
     }
 }
 
-/// Nanoseconds of `CLOCK_MONOTONIC_RAW`.
-pub fn monotonic_raw_ns() -> u64 {
-    use nix::time::{ClockId, clock_gettime};
-    let time = clock_gettime(ClockId::CLOCK_MONOTONIC_RAW)
-        .expect("clock_gettime(CLOCK_MONOTONIC_RAW) failed (Linux 2.6.28 or later has it)");
-    time.tv_sec() as u64 * 1_000_000_000 + time.tv_nsec() as u64
-}
+pub use super::monotonic_raw_ns;
+
+/// The CPU flags the clock needs: an invariant counter and `rdtscp`.
+pub const CLOCK_FLAGS: [&str; 3] = ["constant_tsc", "nonstop_tsc", "rdtscp"];
 
 /// Stops unless the CPU has an invariant counter (`constant_tsc`,
 /// `nonstop_tsc`) and `rdtscp`.
@@ -51,9 +48,9 @@ pub fn monotonic_raw_ns() -> u64 {
 /// # Errors
 ///
 /// Naming the missing flags, or if `/proc/cpuinfo` cannot be read.
-pub fn require_invariant_tsc() -> anyhow::Result<()> {
+fn require_invariant_tsc() -> anyhow::Result<()> {
     let flags = super::machine::cpu_flags()?;
-    let missing: Vec<&str> = ["constant_tsc", "nonstop_tsc", "rdtscp"]
+    let missing: Vec<&str> = CLOCK_FLAGS
         .into_iter()
         .filter(|flag| !flags.iter().any(|present| present == flag))
         .collect();
@@ -69,7 +66,7 @@ fn gcd(a: u64, b: u64) -> u64 {
 
 /// Empty regions (and consecutive reads) sampled to measure the overhead
 /// and the step of the counter.
-const EMPTY_REGIONS: usize = 100_000;
+pub const EMPTY_REGIONS: usize = 100_000;
 
 /// An empty timed region longer than this many times the median one was
 /// interrupted; such regions are left out of the overhead.
@@ -165,6 +162,12 @@ impl Clock {
     /// The overhead subtracted from every timed region, in nanoseconds.
     pub fn overhead_ns(&self) -> f64 {
         self.overhead_ticks / self.ticks_per_ns
+    }
+
+    /// Converts nanoseconds to (fractional) ticks.
+    #[inline]
+    pub fn ticks(&self, ns: f64) -> f64 {
+        ns * self.ticks_per_ns
     }
 
     /// Converts a tick count to nanoseconds.

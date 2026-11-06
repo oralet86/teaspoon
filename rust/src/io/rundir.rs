@@ -43,6 +43,17 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Reads a JSON file as `T`.
+///
+/// # Errors
+///
+/// If the file cannot be read or parsed as `T`.
+pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+}
+
 /// `path` with `.tmp` appended to its file name.
 pub fn temporary_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();

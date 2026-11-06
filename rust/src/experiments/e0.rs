@@ -2,7 +2,7 @@
 //! (`ideas/rust-port.md` §8.1).
 //!
 //! One run answers seven questions, in this order, all on generated uniform
-//! instances ([`super::uniform_instance`]):
+//! instances ([`uniform_instance`]):
 //!
 //! 1. **Clock:** TSC calibration at start and end, read overhead and
 //!    resolution.
@@ -43,47 +43,103 @@ use std::path::{Path, PathBuf};
 use std::sync::Barrier;
 
 use anyhow::{Context, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::common::{
-    Pass, batched_counts, batched_time, improving_replays, sampled_batch, timed_restores, warm_up,
+    Pass, Storage, batched_counts, batched_time, improving_replays, sampled_batch, timed_restores,
+    warm_up,
 };
-use super::{
-    coefficient_of_variation, cv_interval, mean, median, quantile, random_order, uniform_instance,
-};
+use super::states::EARLY_STATES_MAX_N;
+use super::{coefficient_of_variation, cv_interval, mean, median, quantile};
 use crate::City;
-use crate::instance::Instance;
 use crate::instance::neighbours::CandidateLists;
+use crate::instance::neighbours::NEIGHBOURS;
 use crate::instance::storage::{Computed, Dist, Matrix};
 use crate::instance::tsplib::CoordinateKind;
+use crate::instance::{Instance, sha256_hex};
 use crate::io::parquet::{Column, Table, write};
-use crate::io::provenance::write_config;
+use crate::io::provenance::{read_settings, write_config};
 use crate::io::rundir::{new_run_directory, write_atomic};
 use crate::ops::{Op, Problem, Work, descend};
-use crate::rng::Stream;
+use crate::rng::{Stream, label_hash};
 use crate::timing::counters::Counts;
-use crate::timing::cycles::{self, Reading, ThreadCounters};
+use crate::timing::cycles::{self, FREQUENCY_DRIFT, FrequencyWatch};
 use crate::timing::machine::{self, MachineState};
 use crate::timing::pin;
+use crate::timing::session::CoreRoles;
 use crate::timing::tsc::{self, Clock};
 use crate::tour::array::Array;
 use crate::tour::blocks::Blocks;
 use crate::tour::{Layout, Tour};
 
+/// Side of the square of generated coordinates (DIMACS `portgen` uses the
+/// same `MAXCOORD`).
+const UNIFORM_SIDE: u64 = 1_000_000;
+
+/// A uniform random `EUC_2D` instance with `n` cities: integer coordinates
+/// drawn uniformly from `[0, UNIFORM_SIDE)²` with the stream
+/// (`seed`, "uniform-instance", n).  Alpha candidates are computed when
+/// `with_alpha` is set (untimed; O(n²) per ascent iteration).
+///
+/// E0 measures costs against n on these instead of the DIMACS files, so
+/// any size can be generated in-process.
+///
+/// # Errors
+///
+/// If a distance overflows `i32` (impossible for this side) or the alpha
+/// lists are inconsistent with the matrix.
+fn uniform_instance(n: usize, seed: u64, with_alpha: bool) -> anyhow::Result<Instance> {
+    anyhow::ensure!(
+        n > NEIGHBOURS,
+        "uniform instance needs more than {NEIGHBOURS} cities"
+    );
+    let mut rng = Stream::new(seed, "uniform-instance", &[n as u64]);
+    let points: Vec<[f64; 2]> = (0..n)
+        .map(|_| {
+            [
+                rng.below(UNIFORM_SIDE) as f64,
+                rng.below(UNIFORM_SIDE) as f64,
+            ]
+        })
+        .collect();
+    let bytes: Vec<u8> = points
+        .iter()
+        .flat_map(|point| point.iter().flat_map(|value| value.to_le_bytes()))
+        .collect();
+    let computed = Computed::new(CoordinateKind::Euc2d, points);
+    let matrix = Matrix::from_computed(&computed).map_err(anyhow::Error::msg)?;
+    let mut instance = Instance::from_distances(
+        format!("uniform-{n}-{seed}"),
+        PathBuf::from("<generated>"),
+        sha256_hex(&bytes),
+        matrix,
+        Some(computed),
+    );
+    if with_alpha {
+        instance.compute_alpha()?;
+    }
+    Ok(instance)
+}
+
+/// A random permutation of `0..n` from the stream (`seed`, `label`, n).
+fn random_order(n: usize, seed: u64, label: &str) -> Vec<City> {
+    let mut order: Vec<City> = (0..n as City).collect();
+    Stream::new(seed, label, &[n as u64]).shuffle(&mut order);
+    order
+}
+
 /// Repeatability gate: the largest coefficient of variation between
 /// repeats allowed for any one cell (n, layout, state, operator).  Until
 /// 2026-11-02 the gate was over all cells (median ≤ 1.5%, 95th percentile
 /// ≤ 5%), which let the steadiest cells carry the worst 5%.
-pub const GATE_CELL_CV: f64 = 0.05;
+const GATE_CELL_CV: f64 = 0.05;
 /// Contention gate: largest allowed slowdown of any operator (spec §13 O5).
-pub const GATE_SLOWDOWN: f64 = 0.02;
-/// Largest allowed change of the measured core frequency within a block
-/// (spec §13 O5); blocks beyond it are flagged as suspect.
-pub const FREQUENCY_DRIFT: f64 = 0.01;
-
-/// Settings of one E0-rs run.
-#[derive(Debug, Clone, Serialize)]
+const GATE_SLOWDOWN: f64 = 0.02;
+/// Settings of one E0-rs run.  Fields missing from a stored run (older
+/// builds) take their [`Settings::full`] values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// Seed of instances, states, anchors and random streams.
     pub seed: u64,
@@ -137,7 +193,7 @@ impl Settings {
         Self {
             seed: 0,
             cost_sizes: vec![100, 200, 500, 1000, 2000, 5000],
-            random_state_max_n: 1000,
+            random_state_max_n: EARLY_STATES_MAX_N,
             anchors: 100,
             repeats: 5,
             rounds: 3,
@@ -161,7 +217,7 @@ impl Settings {
         Self {
             seed: 0,
             cost_sizes: vec![100, 300],
-            random_state_max_n: 1000,
+            random_state_max_n: EARLY_STATES_MAX_N,
             anchors: 8,
             repeats: 2,
             rounds: 2,
@@ -180,12 +236,25 @@ impl Settings {
         }
     }
 
-    fn state_names(&self, n: usize) -> Vec<&'static str> {
-        if n <= self.random_state_max_n {
-            vec!["random", "opt2", "lkopt"]
-        } else {
-            vec!["opt2", "lkopt"]
-        }
+    /// Checks what the contention gate assumes: phases that start and end
+    /// with one worker (the baseline and the drift check).
+    ///
+    /// # Errors
+    ///
+    /// If the first or last contention phase has more than one worker.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.contention_workers.first() == Some(&1)
+                && self.contention_workers.last() == Some(&1),
+            "contention phases must start and end with 1 worker (baseline and drift)"
+        );
+        Ok(())
+    }
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self::full()
     }
 }
 
@@ -200,12 +269,17 @@ impl StateSet {
         self.instance.n()
     }
 
+    /// The O18-optimal state.
+    fn lkopt(&self) -> anyhow::Result<&[City]> {
+        self.states
+            .iter()
+            .find(|(name, _)| *name == "lkopt")
+            .map(|(_, order)| order.as_slice())
+            .context("the state set has no O18 optimum")
+    }
+
     fn problem(&self) -> Problem<'_, Matrix, true> {
-        Problem {
-            dist: &self.instance.matrix,
-            neighbours: &self.instance.neighbours,
-            alpha: self.instance.alpha.as_ref(),
-        }
+        Problem::new(&self.instance.matrix, &self.instance)
     }
 }
 
@@ -213,16 +287,12 @@ impl StateSet {
 /// descent, and an O18 optimum reached from the O7 optimum.
 fn build_states(settings: &Settings, n: usize) -> anyhow::Result<StateSet> {
     let instance = uniform_instance(n, settings.seed, true)?;
-    let problem = Problem::<'_, Matrix, true> {
-        dist: &instance.matrix,
-        neighbours: &instance.neighbours,
-        alpha: instance.alpha.as_ref(),
-    };
+    let problem = Problem::<'_, Matrix, true>::new(&instance.matrix, &instance);
     let random = random_order(n, settings.seed, "e0-state");
     let mut tour: Tour<Array> = Tour::new(&random, &instance.matrix);
     let all: Vec<City> = (0..n as City).collect();
     let mut work = Work::default();
-    descend(&mut tour, &problem, &mut work, &all, None);
+    descend(&mut tour, &problem, &mut work, &all);
     tour.clear_log();
     let opt2 = tour.order();
     let mut rng = Stream::new(settings.seed, "e0-lkopt", &[]);
@@ -241,18 +311,12 @@ fn build_states(settings: &Settings, n: usize) -> anyhow::Result<StateSet> {
     tour.check(&instance.matrix)
         .map_err(|message| anyhow::anyhow!("lkopt state of n={n}: {message}"))?;
     let lkopt = tour.order();
-    let states = settings
-        .state_names(n)
-        .into_iter()
-        .map(|name| {
-            let order = match name {
-                "random" => random.clone(),
-                "opt2" => opt2.clone(),
-                _ => lkopt.clone(),
-            };
-            (name, order)
-        })
-        .collect();
+    let mut states = Vec::new();
+    if n <= settings.random_state_max_n {
+        states.push(("random", random));
+    }
+    states.push(("opt2", opt2));
+    states.push(("lkopt", lkopt));
     Ok(StateSet { instance, states })
 }
 
@@ -346,17 +410,6 @@ fn cool_down(opening: Option<f64>) {
     );
 }
 
-fn khz(cpu: usize) -> Option<f64> {
-    machine::average_khz(cpu).map(|value| value as f64)
-}
-
-fn drifted(before: Option<f64>, after: Option<f64>) -> bool {
-    match (before, after) {
-        (Some(before), Some(after)) => (after - before).abs() / before > FREQUENCY_DRIFT,
-        _ => false,
-    }
-}
-
 // ---------------------------------------------------------------- 1. clock
 
 /// Clock readings at one point of the run.
@@ -372,7 +425,7 @@ struct ClockReading {
 
 fn read_clock(stage: &'static str) -> anyhow::Result<ClockReading> {
     let clock = Clock::calibrate(10, 100)?;
-    let gaps: Vec<f64> = (0..100_000)
+    let gaps: Vec<f64> = (0..tsc::EMPTY_REGIONS)
         .map(|_| {
             let begin = tsc::start();
             (tsc::stop() - begin) as f64
@@ -380,7 +433,7 @@ fn read_clock(stage: &'static str) -> anyhow::Result<ClockReading> {
         .collect();
     let mut resolution = u64::MAX;
     let mut previous = tsc::start();
-    for _ in 0..100_000 {
+    for _ in 0..tsc::EMPTY_REGIONS {
         let now = tsc::start();
         if now > previous {
             resolution = resolution.min(now - previous);
@@ -512,13 +565,9 @@ struct ReadRows {
     ns_per_read: Vec<f64>,
 }
 
-/// A measurement: name, its baseline's name, and the loop for a seed and
+/// A measurement: its name (see [`read_baseline`]) and the loop for a seed and
 /// access pattern (`true` = chain).
-type Measure<'a> = (
-    &'static str,
-    &'static str,
-    Box<dyn Fn(u64, bool) -> u64 + 'a>,
-);
+type Measure<'a> = (&'static str, Box<dyn Fn(u64, bool) -> u64 + 'a>);
 
 fn measure_reads(
     settings: &Settings,
@@ -559,20 +608,16 @@ fn measure_reads(
             }
         }
         let measures: Vec<Measure<'_>> = vec![
-            ("pair_baseline", "", Box::new(both(&pair, reads))),
-            ("matrix", "pair_baseline", Box::new(both(&matrix, reads))),
-            (
-                "computed_euc2d",
-                "pair_baseline",
-                Box::new(both(&euc, reads)),
-            ),
-            ("computed_geo", "pair_baseline", Box::new(both(&geo, reads))),
-            ("slot_baseline", "", Box::new(both(&slot, reads))),
-            ("cache", "slot_baseline", Box::new(both(&cache, reads))),
+            ("pair_baseline", Box::new(both(&pair, reads))),
+            ("matrix", Box::new(both(&matrix, reads))),
+            ("computed_euc2d", Box::new(both(&euc, reads))),
+            ("computed_geo", Box::new(both(&geo, reads))),
+            ("slot_baseline", Box::new(both(&slot, reads))),
+            ("cache", Box::new(both(&cache, reads))),
         ];
         for repeat in 0..settings.read_repeats {
             let seed = 0x9E37_79B9 ^ ((repeat as u64 + 1) * 0x1000_0001);
-            for (mode, _, measure) in &measures {
+            for (mode, measure) in &measures {
                 for chain in [false, true] {
                     let begin = tsc::start();
                     let sum = measure(seed, chain);
@@ -605,7 +650,7 @@ fn measure_reads(
     Ok(rows)
 }
 
-/// Baseline of each read mode (empty: none).
+/// The baseline measure of a read mode, whose cost is subtracted from it.
 fn read_baseline(mode: &str) -> Option<&'static str> {
     match mode {
         "matrix" | "computed_euc2d" | "computed_geo" => Some("pair_baseline"),
@@ -760,51 +805,6 @@ struct CostBatchRows {
     suspect: Vec<bool>,
 }
 
-/// The calling thread's core-cycle counters and the reference frequency
-/// measured with them on the timed core, for the per-block drift check.
-struct Frequency {
-    counters: Option<ThreadCounters>,
-    reference_khz: Option<f64>,
-}
-
-impl Frequency {
-    /// Opens the counters on the calling thread and measures its reference
-    /// frequency; without a counter (only possible with
-    /// `--allow-unlocked-clock`, where its absence is a recorded machine
-    /// problem) the check falls back to the kernel's snapshots.
-    fn on_this_thread() -> anyhow::Result<Self> {
-        let mut counters = ThreadCounters::open()
-            .inspect_err(|error| log::warn!("no core-cycle counter: {error:#}"))
-            .ok();
-        let reference_khz = match counters.as_mut() {
-            Some(counters) => Some(counters.reference_khz(200)?),
-            None => None,
-        };
-        Ok(Self {
-            counters,
-            reference_khz,
-        })
-    }
-
-    fn read(&mut self) -> anyhow::Result<Option<Reading>> {
-        self.counters.as_mut().map(ThreadCounters::read).transpose()
-    }
-
-    /// Whether the block since `before` ran more than the tolerance away
-    /// from the reference frequency.
-    fn drifted_since(&mut self, before: Option<Reading>) -> anyhow::Result<bool> {
-        let average = match (self.read()?, before) {
-            (Some(after), Some(before)) => after.khz_since(&before),
-            _ => None,
-        };
-        Ok(cycles::drifted(
-            self.reference_khz,
-            average,
-            FREQUENCY_DRIFT,
-        ))
-    }
-}
-
 /// Times every (operator, anchor) from `order` as measurement A does
 /// (`ideas/rust-port.md` §7.4): operators in a shuffled order, each over
 /// every anchor (shuffled) back to back, in the passes of [`Pass::order`]
@@ -822,14 +822,14 @@ fn cost_block<L: Layout>(
     expected: &HashMap<(Op, City), i64>,
     repeat: usize,
     cpu: usize,
-    frequency: &mut Frequency,
+    frequency: &mut FrequencyWatch,
     rows: &mut CostRows,
     batches: &mut CostBatchRows,
 ) -> anyhow::Result<()> {
     let n = set.n();
     let problem = set.problem();
     let mut tour: Tour<L> = Tour::new(order, &set.instance.matrix);
-    crate::timing::disturb::spin_up(crate::timing::disturb::SPIN_UP_MS);
+    crate::timing::disturb::spin_up();
     let length = tour.length();
     // Operator and pass order: the same in every repeat (not drawn per
     // repeat), so that every repeat replays one identical sequence from the
@@ -840,12 +840,12 @@ fn cost_block<L: Layout>(
     let mut order_rng = Stream::new(
         settings.seed,
         "e0-cost-order",
-        &[n as u64, label_key(L::NAME), label_key(state)],
+        &[n as u64, label_hash(L::NAME), label_hash(state)],
     );
     let mut ops = Op::ALL.to_vec();
     order_rng.shuffle(&mut ops);
-    let label = format!("e0:{n}:{state}");
-    let before = khz(cpu);
+    let label = cost_label(n, state);
+    let before = machine::average_khz_f64(cpu);
     let reading = frequency.read()?;
     let (first_row, first_batch) = (rows.n.len(), batches.n.len());
     let mismatch = |op: Op, anchor: City, delta: i64| {
@@ -878,11 +878,10 @@ fn cost_block<L: Layout>(
             Stream::new(
                 settings.seed,
                 "e0-cost-anchor-order",
-                &[n as u64, label_key(state), op as u64],
+                &[n as u64, label_hash(state), op as u64],
             )
             .shuffle(&mut shuffled);
-            let stream =
-                |anchor: City| Stream::new(settings.seed, &label, &[op as u64, u64::from(anchor)]);
+            let stream = |anchor: City| application_stream(settings.seed, &label, op, anchor);
             let improves = shuffled.iter().any(|&anchor| expected[&(op, anchor)] < 0);
             let (mut single, mut restores) = (None, None);
             warm_up(&mut tour, &problem, op, &shuffled, stream);
@@ -990,7 +989,8 @@ fn cost_block<L: Layout>(
                 .push(crate::timing::disturb::take_retakes() as i64);
         }
     }
-    let suspect = drifted(before, khz(cpu)) || frequency.drifted_since(reading)?;
+    let suspect = cycles::drifted(before, machine::average_khz_f64(cpu), FREQUENCY_DRIFT)
+        || frequency.drifted_since(reading)?;
     rows.suspect
         .extend(std::iter::repeat_n(suspect, rows.n.len() - first_row));
     batches
@@ -1001,8 +1001,15 @@ fn cost_block<L: Layout>(
     Ok(())
 }
 
-fn label_key(label: &str) -> u64 {
-    crate::rng::label_hash(label)
+/// The stream of one application of `op` at `anchor` under `label`.
+fn application_stream(seed: u64, label: &str, op: Op, anchor: City) -> Stream {
+    Stream::new(seed, label, &[op as u64, u64::from(anchor)])
+}
+
+/// The stream label of the cost sweep's applications on one state, shared
+/// by the untimed expected changes and the timed blocks.
+fn cost_label(n: usize, state: &str) -> String {
+    format!("e0:{n}:{state}")
 }
 
 /// The anchors of the cost sweep for one state (a fixed sample).
@@ -1010,7 +1017,7 @@ fn cost_anchors(settings: &Settings, n: usize, state: &str) -> Vec<City> {
     Stream::new(
         settings.seed,
         "e0-cost-anchors",
-        &[n as u64, label_key(state)],
+        &[n as u64, label_hash(state)],
     )
     .sample(n, settings.anchors.min(n))
     .into_iter()
@@ -1029,12 +1036,12 @@ fn expected_changes(settings: &Settings, set: &StateSet, state: &str, order: &[C
     let n = set.n();
     let problem = set.problem();
     let mut tour: Tour<Array> = Tour::new(order, &set.instance.matrix);
-    let label = format!("e0:{n}:{state}");
+    let label = cost_label(n, state);
     let mut changes = HashMap::new();
     for op in Op::ALL {
         for anchor in cost_anchors(settings, n, state) {
             let mark = tour.mark();
-            let mut rng = Stream::new(settings.seed, &label, &[op as u64, u64::from(anchor)]);
+            let mut rng = application_stream(settings.seed, &label, op, anchor);
             let delta = op
                 .apply(
                     &mut tour,
@@ -1057,7 +1064,7 @@ fn measure_costs(
     sets: &BTreeMap<usize, StateSet>,
     log: &mut MachineLog,
     cpu: usize,
-    frequency: &mut Frequency,
+    frequency: &mut FrequencyWatch,
 ) -> anyhow::Result<(CostRows, CostBatchRows)> {
     let mut expected: HashMap<(usize, &str), Changes> = HashMap::new();
     for &n in &settings.cost_sizes {
@@ -1149,7 +1156,7 @@ fn descent<L: Layout>(
     let mut work = Work::default();
     let problem = set.problem();
     let begin = tsc::start();
-    descend(&mut tour, &problem, &mut work, &all, None);
+    descend(&mut tour, &problem, &mut work, &all);
     let end = tsc::stop();
     tour.check(&set.instance.matrix)
         .map_err(|message| anyhow::anyhow!("descent n={n}: {message}"))?;
@@ -1266,7 +1273,7 @@ fn contention_worker(
             let n = set.n();
             let tour: Tour<Array> = Tour::new(order, &set.instance.matrix);
             let anchors: Vec<City> =
-                Stream::new(settings.seed, "e0c-anchors", &[n as u64, label_key(state)])
+                Stream::new(settings.seed, "e0c-anchors", &[n as u64, label_hash(state)])
                     .sample(n, settings.contention_anchors.min(n))
                     .into_iter()
                     .map(|anchor| anchor as City)
@@ -1276,7 +1283,7 @@ fn contention_worker(
     }
     let mut rows = ContentionRows::default();
     barrier.wait();
-    crate::timing::disturb::spin_up(crate::timing::disturb::SPIN_UP_MS);
+    crate::timing::disturb::spin_up();
     let started = tsc::monotonic_raw_ns();
     let deadline = started + (seconds * 1e9) as u64;
     let mut round = 0u32;
@@ -1290,16 +1297,14 @@ fn contention_worker(
             Stream::new(
                 settings.seed,
                 "e0c-order",
-                &[n as u64, label_key(state), u64::from(round)],
+                &[n as u64, label_hash(state), u64::from(round)],
             )
             .shuffle(&mut ops);
             for op in ops {
                 if tsc::monotonic_raw_ns() > deadline {
                     break 'rounds;
                 }
-                let stream = |anchor: City| {
-                    Stream::new(settings.seed, &label, &[op as u64, u64::from(anchor)])
-                };
+                let stream = |anchor: City| application_stream(settings.seed, &label, op, anchor);
                 warm_up(tour, &problem, op, anchors, stream);
                 let mut deltas = vec![0i64; anchors.len()];
                 let sample =
@@ -1317,7 +1322,7 @@ fn contention_worker(
             }
         }
         let elapsed = (tsc::monotonic_raw_ns() - started) as f64 / 1e9;
-        let frequency = khz(cpu);
+        let frequency = machine::average_khz_f64(cpu);
         for (n, state, op, totals) in round_rows {
             rows.phase.push(phase as u32);
             rows.workers.push(workers as u32);
@@ -1414,7 +1419,58 @@ fn measure_contention(
 /// anchor (the old order of measurement A), one region per call grouped by
 /// operator (the per-call pass of measurement A), and one region around
 /// all of an operator's anchors (its batched pass).
-const TIMING_MODES: [&str; 3] = ["mixed_per_call", "grouped_per_call", "batched"];
+const TIMING_MODES: [TimingMode; 3] = [
+    TimingMode::MixedPerCall,
+    TimingMode::GroupedPerCall,
+    TimingMode::Batched,
+];
+
+/// One way of timing the per-call check's applications.  The order of the
+/// variants is the order of their names, the order of the table rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum TimingMode {
+    /// One region around each operator's applications at every anchor.
+    Batched,
+    /// One region per application, operator by operator.
+    GroupedPerCall,
+    /// One region per application, operators interleaved at each anchor.
+    MixedPerCall,
+}
+
+impl TimingMode {
+    fn name(self) -> &'static str {
+        match self {
+            TimingMode::Batched => "batched",
+            TimingMode::GroupedPerCall => "grouped_per_call",
+            TimingMode::MixedPerCall => "mixed_per_call",
+        }
+    }
+}
+
+/// Times one application as its own region and adds it to the totals of
+/// (`mode`, `op`); returns whether it changed the tour.
+#[allow(clippy::too_many_arguments)]
+fn time_one_call<D: Dist, const C: bool, L: Layout>(
+    tour: &mut Tour<L>,
+    problem: &Problem<'_, D, C>,
+    clock: &Clock,
+    mode: TimingMode,
+    op: Op,
+    anchor: City,
+    mut rng: Stream,
+    totals: &mut BTreeMap<(TimingMode, Op), (f64, i64)>,
+) -> bool {
+    let mut work = Work::default();
+    let begin = tsc::start();
+    let delta = op
+        .apply(tour, problem, &mut rng, &mut work, Some(anchor))
+        .delta;
+    let end = tsc::stop();
+    let entry = totals.entry((mode, op)).or_default();
+    entry.0 += clock.region_ns(begin, end);
+    entry.1 += 1;
+    delta != 0
+}
 
 #[derive(Default)]
 struct PerCallRows {
@@ -1432,12 +1488,7 @@ struct PerCallRows {
 /// timing modes do exactly the same work (a batch then needs no restore).
 fn unchanged_anchors(settings: &Settings, set: &StateSet) -> anyhow::Result<Vec<City>> {
     let n = set.n();
-    let order = &set
-        .states
-        .iter()
-        .find(|(name, _)| *name == "lkopt")
-        .context("the state set has no O18 optimum")?
-        .1;
+    let order = set.lkopt()?;
     let problem = set.problem();
     let mut tour: Tour<Array> = Tour::new(order, &set.instance.matrix);
     let mut cities: Vec<City> = (0..n as City).collect();
@@ -1491,14 +1542,9 @@ fn per_call_block<L: Layout>(
 ) -> anyhow::Result<()> {
     let n = set.n();
     let problem = set.problem();
-    let order = &set
-        .states
-        .iter()
-        .find(|(name, _)| *name == "lkopt")
-        .context("the state set has no O18 optimum")?
-        .1;
+    let order = set.lkopt()?;
     let mut tour: Tour<L> = Tour::new(order, &set.instance.matrix);
-    crate::timing::disturb::spin_up(crate::timing::disturb::SPIN_UP_MS);
+    crate::timing::disturb::spin_up();
     let (length, hash) = (tour.length(), tour.hash());
     let mut ops: Vec<Op> = Op::ALL
         .into_iter()
@@ -1506,59 +1552,57 @@ fn per_call_block<L: Layout>(
         .collect();
     let mut anchors = anchors.to_vec();
     let label = format!("e0-per-call:{n}");
-    let stream =
-        |op: Op, anchor: City| Stream::new(settings.seed, &label, &[op as u64, u64::from(anchor)]);
+    let stream = |op: Op, anchor: City| application_stream(settings.seed, &label, op, anchor);
     let mut order_rng = Stream::new(
         settings.seed,
         "e0-per-call-order",
-        &[n as u64, label_key(L::NAME), repeat as u64],
+        &[n as u64, label_hash(L::NAME), repeat as u64],
     );
     let mut modes = TIMING_MODES.to_vec();
     order_rng.shuffle(&mut modes);
-    // (total ns, applications) per (mode, operator).
-    let mut totals: BTreeMap<(&str, Op), (f64, i64)> = BTreeMap::new();
+    let mut totals: BTreeMap<(TimingMode, Op), (f64, i64)> = BTreeMap::new();
     let mut moved = false;
     for mode in modes {
         match mode {
-            "mixed_per_call" => {
+            TimingMode::MixedPerCall => {
                 order_rng.shuffle(&mut anchors);
                 for &anchor in &anchors {
                     order_rng.shuffle(&mut ops);
                     for &op in &ops {
-                        let mut rng = stream(op, anchor);
-                        let mut work = Work::default();
-                        let begin = tsc::start();
-                        let delta = op
-                            .apply(&mut tour, &problem, &mut rng, &mut work, Some(anchor))
-                            .delta;
-                        let end = tsc::stop();
-                        moved |= delta != 0;
-                        let entry = totals.entry((mode, op)).or_default();
-                        entry.0 += clock.region_ns(begin, end);
-                        entry.1 += 1;
+                        let rng = stream(op, anchor);
+                        moved |= time_one_call(
+                            &mut tour,
+                            &problem,
+                            clock,
+                            mode,
+                            op,
+                            anchor,
+                            rng,
+                            &mut totals,
+                        );
                     }
                 }
             }
-            "grouped_per_call" => {
+            TimingMode::GroupedPerCall => {
                 order_rng.shuffle(&mut ops);
                 for &op in &ops {
                     order_rng.shuffle(&mut anchors);
                     for &anchor in &anchors {
-                        let mut rng = stream(op, anchor);
-                        let mut work = Work::default();
-                        let begin = tsc::start();
-                        let delta = op
-                            .apply(&mut tour, &problem, &mut rng, &mut work, Some(anchor))
-                            .delta;
-                        let end = tsc::stop();
-                        moved |= delta != 0;
-                        let entry = totals.entry((mode, op)).or_default();
-                        entry.0 += clock.region_ns(begin, end);
-                        entry.1 += 1;
+                        let rng = stream(op, anchor);
+                        moved |= time_one_call(
+                            &mut tour,
+                            &problem,
+                            clock,
+                            mode,
+                            op,
+                            anchor,
+                            rng,
+                            &mut totals,
+                        );
                     }
                 }
             }
-            _ => {
+            TimingMode::Batched => {
                 order_rng.shuffle(&mut ops);
                 for &op in &ops {
                     order_rng.shuffle(&mut anchors);
@@ -1592,7 +1636,7 @@ fn per_call_block<L: Layout>(
         rows.layout.push(L::NAME.to_string());
         rows.operator.push(op.name().to_string());
         rows.repeat.push(repeat as u32);
-        rows.mode.push(mode.to_string());
+        rows.mode.push(mode.name().to_string());
         rows.applications.push(count);
         rows.mean_ns.push(total / count as f64);
     }
@@ -1646,9 +1690,9 @@ fn per_call_summary(rows: &PerCallRows) -> Value {
             .map(|(mode, values)| (*mode, median(values)))
             .collect();
         let (Some(&batched), Some(&per_call), Some(&interleaved)) = (
-            medians.get("batched"),
-            medians.get("grouped_per_call"),
-            medians.get("mixed_per_call"),
+            medians.get(TimingMode::Batched.name()),
+            medians.get(TimingMode::GroupedPerCall.name()),
+            medians.get(TimingMode::MixedPerCall.name()),
         ) else {
             continue;
         };
@@ -2012,8 +2056,8 @@ fn contention_cells<'a>(settings: &Settings, rows: &'a ContentionRows) -> Vec<Co
             "e0-contention-bootstrap",
             &[
                 u64::from(n),
-                label_key(state),
-                label_key(operator),
+                label_hash(state),
+                label_hash(operator),
                 u64::from(phase),
             ],
         );
@@ -2435,20 +2479,8 @@ fn repeat_non_passing(cells: &[RepeatCell]) -> Vec<Value> {
 /// cannot be written.
 pub fn regate(directory: &Path) -> anyhow::Result<Value> {
     use crate::io::parquet::{column_bool, column_f64, column_i64, column_str, read};
-    let config: Value = serde_json::from_str(
-        &std::fs::read_to_string(directory.join("config.json")).context("reading config.json")?,
-    )
-    .context("parsing config.json")?;
-    let stored = &config["settings"]["settings"];
-    let mut settings = Settings::full();
-    settings.seed = stored["seed"].as_u64().context("config.json has no seed")?;
-    settings.contention_workers = stored["contention_workers"]
-        .as_array()
-        .context("config.json has no contention_workers")?
-        .iter()
-        .map(|workers| workers.as_u64().map(|workers| workers as usize))
-        .collect::<Option<_>>()
-        .context("contention_workers holds a non-integer")?;
+    let settings: Settings = read_settings(directory, "settings")?;
+    settings.validate()?;
     let u32s = |batch: &arrow::record_batch::RecordBatch, name: &str| -> anyhow::Result<Vec<u32>> {
         column_i64(batch, name)?
             .into_iter()
@@ -2749,22 +2781,21 @@ pub fn run(
     allow_unlocked: bool,
     out: Option<PathBuf>,
 ) -> anyhow::Result<PathBuf> {
-    let cores = pin::physical_cores()?;
+    settings.validate()?;
     let max_workers = settings
         .contention_workers
         .iter()
         .copied()
         .max()
         .unwrap_or(1);
-    if max_workers + 1 > cores.len() {
-        bail!(
-            "{max_workers} contention workers need {} physical cores (one for the main thread), found {}",
-            max_workers + 1,
-            cores.len()
-        );
-    }
-    let main_core = *cores.last().expect("at least two cores");
-    let timed_core = cores[0];
+    // Not a [`TimedSession`]: the states are built on every CPU before the
+    // main thread is pinned, and the clock is calibrated on the timed core.
+    let CoreRoles {
+        cores,
+        timed,
+        main: main_core,
+    } = CoreRoles::workers(max_workers)?;
+    let timed_core = timed[0];
     let problems = machine::require_locked(&cores, allow_unlocked)?;
     let directory = match out {
         Some(directory) => {
@@ -2830,7 +2861,7 @@ pub fn run(
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "representations": [Array::NAME, Blocks::NAME],
-            "storage": "matrix",
+            "storage": Storage::Matrix,
             "candidate_cache": true,
         }),
     )?;
@@ -2839,7 +2870,7 @@ pub fn run(
     let (reads, flips, costs, cost_batches, per_call, descents, reference_khz, log) =
         on_core(timed_core, || {
             let mut log = log;
-            let mut frequency = Frequency::on_this_thread()?;
+            let mut frequency = FrequencyWatch::on_this_thread(allow_unlocked)?;
             let reads = measure_reads(settings, &clock, &mut log, timed_core)?;
             log::info!("flip cost");
             let flips = measure_flips(settings, &clock, &mut log, timed_core)?;
@@ -2868,7 +2899,7 @@ pub fn run(
             ))
         })?;
     let mut log = log;
-    let contention = measure_contention(settings, &clock, &sets, &cores[..max_workers], &mut log)?;
+    let contention = measure_contention(settings, &clock, &sets, &timed, &mut log)?;
     let clock_end = on_core(timed_core, || read_clock("end"))?;
     log.record("end", &cores);
 
@@ -3023,4 +3054,17 @@ pub fn run(
     )?;
     log::info!("E0-rs finished: {}", directory.display());
     Ok(directory)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uniform_instances_are_reproducible() {
+        let first = uniform_instance(30, 7, false).unwrap();
+        let second = uniform_instance(30, 7, false).unwrap();
+        assert_eq!(first.sha256, second.sha256);
+        assert_ne!(first.sha256, uniform_instance(30, 8, false).unwrap().sha256);
+    }
 }

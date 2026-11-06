@@ -137,9 +137,9 @@ pub fn keep_heap() {
 }
 
 /// Busy time before a timed block (ms), see [`spin_up`].
-pub const SPIN_UP_MS: u64 = 50;
+const SPIN_UP_MS: u64 = 50;
 
-/// Keeps the calling thread busy for `milliseconds`.  Called before each
+/// Keeps the calling thread busy for [`SPIN_UP_MS`].  Called before each
 /// timed block: after the core has been idle (between blocks, while files
 /// are read or written) its first timed work runs slow, because a deep idle
 /// state empties the core's caches and the data-fabric clock may have
@@ -147,10 +147,10 @@ pub const SPIN_UP_MS: u64 = 50;
 /// 2026-11-02: after 50 ms idle, an LK batch ran 1.57 times its settled
 /// time in the first millisecond, 1.09 times at 4 ms and settled within
 /// about 15–30 ms.
-pub fn spin_up(milliseconds: u64) {
+pub fn spin_up() {
     let started = std::time::Instant::now();
     let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
-    while started.elapsed().as_millis() < u128::from(milliseconds) {
+    while started.elapsed().as_millis() < u128::from(SPIN_UP_MS) {
         for _ in 0..1000 {
             state = state
                 .wrapping_mul(6_364_136_223_846_793_005)

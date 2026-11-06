@@ -1,9 +1,7 @@
 //! Neighbour-list 2-opt: O7, O14, O15, O17 and the descent inside the
 //! kicks.
 
-use std::collections::VecDeque;
-
-use super::{Application, Problem, Work, pick_anchor, reverse};
+use super::{Application, Problem, Work, WorkQueue, pick_anchor, reverse};
 use crate::City;
 use crate::instance::neighbours::CandidateLists;
 use crate::instance::storage::Dist;
@@ -80,40 +78,36 @@ pub(super) fn two_opt_nl<D: Dist, const C: bool, L: Layout>(
 }
 
 /// Applies neighbour-list 2-opt moves until none improves (an O7 local
-/// optimum), processing cities from a queue (`aos.operators.descend`).
-///
-/// Cities whose search fails leave the queue; cities touched by an applied
-/// move re-enter it (don't-look bits, Bentley 1992).  With `stop_gain`, the
-/// descent stops as soon as its total gain reaches that value (used to
-/// build partly descended tours).  Returns the total length change.
+/// optimum), searching the cities of a [`WorkQueue`] started with `start`
+/// (`aos.operators.descend`).  Returns the total length change.
 pub fn descend<D: Dist, const C: bool, L: Layout>(
     tour: &mut Tour<L>,
     problem: &Problem<'_, D, C>,
     work: &mut Work,
     start: &[City],
-    stop_gain: Option<i64>,
 ) -> i64 {
-    let mut queue: VecDeque<City> = VecDeque::with_capacity(start.len().max(16));
-    let mut queued = vec![false; tour.n()];
-    for &city in start {
-        if !std::mem::replace(&mut queued[city as usize], true) {
-            queue.push_back(city);
-        }
-    }
+    descend_until(tour, problem, work, start, i64::MAX)
+}
+
+/// [`descend`], stopped as soon as its total gain reaches `stop_gain`
+/// (partly descended tours).
+pub fn descend_until<D: Dist, const C: bool, L: Layout>(
+    tour: &mut Tour<L>,
+    problem: &Problem<'_, D, C>,
+    work: &mut Work,
+    start: &[City],
+    stop_gain: i64,
+) -> i64 {
+    let mut queue = WorkQueue::new(tour.n(), start.iter().copied());
     let mut total = 0;
-    while let Some(city) = queue.pop_front() {
-        queued[city as usize] = false;
+    while let Some(city) = queue.pop() {
         let (delta, touched) = improve_city(tour, problem, problem.neighbours, city, work);
         if delta < 0 {
             total += delta;
-            if stop_gain.is_some_and(|gain| -total >= gain) {
+            if -total >= stop_gain {
                 break;
             }
-            for other in touched {
-                if !std::mem::replace(&mut queued[other as usize], true) {
-                    queue.push_back(other);
-                }
-            }
+            queue.extend(touched);
         }
     }
     total
@@ -129,7 +123,7 @@ pub(super) fn two_opt_descent<D: Dist, const C: bool, L: Layout>(
     anchor: Option<City>,
 ) -> Application {
     let city = pick_anchor(tour.n(), rng, anchor);
-    let delta = descend(tour, problem, work, &[city], None);
+    let delta = descend(tour, problem, work, &[city]);
     Application {
         delta,
         anchor: city,
