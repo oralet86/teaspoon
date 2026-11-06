@@ -1,6 +1,6 @@
 //! Core cycles of the calling thread from the kernel's performance
-//! counters (`perf_event_open`), for the average core frequency over a
-//! stretch of timed work.
+//! counters (`perf_event_open`, through `perf-event2`), for the average
+//! core frequency over a stretch of timed work.
 //!
 //! The time-stamp counter measures wall time at a fixed rate whatever the
 //! core frequency, so a frequency change during a state goes unnoticed in
@@ -16,84 +16,25 @@
 //! average falls below the reference by more than the tolerance is flagged
 //! as suspect, never silently accepted.
 
-use std::fs::File;
-use std::io::Read;
-use std::os::fd::FromRawFd;
+use anyhow::Context;
+use perf_event::events::{Hardware, Software};
+use perf_event::{Builder, Counter};
 
-use anyhow::{Context, bail};
-
-/// `PERF_TYPE_HARDWARE` / `PERF_COUNT_HW_CPU_CYCLES`.
-const TYPE_HARDWARE: u32 = 0;
-const HW_CPU_CYCLES: u64 = 0;
-/// `PERF_TYPE_SOFTWARE` / `PERF_COUNT_SW_TASK_CLOCK`.
-const TYPE_SOFTWARE: u32 = 1;
-const SW_TASK_CLOCK: u64 = 1;
-/// `perf_event_attr` flag bits: `exclude_kernel` and `exclude_hv`.
-const EXCLUDE_KERNEL: u64 = 1 << 5;
-const EXCLUDE_HV: u64 = 1 << 6;
-
-/// The first 64 bytes of `struct perf_event_attr` (`PERF_ATTR_SIZE_VER0`),
-/// which is all a counting event needs; the kernel accepts this size.
-#[repr(C)]
-#[derive(Default)]
-struct Attr {
-    kind: u32,
-    size: u32,
-    config: u64,
-    sample_period: u64,
-    sample_type: u64,
-    read_format: u64,
-    flags: u64,
-    wakeup_events: u32,
-    bp_type: u32,
-    config1: u64,
-}
-
-/// Opens one counting event of the calling thread, on any CPU.
-fn open_event(kind: u32, config: u64) -> anyhow::Result<File> {
-    let attr = Attr {
-        kind,
-        size: std::mem::size_of::<Attr>() as u32,
-        config,
-        flags: EXCLUDE_KERNEL | EXCLUDE_HV,
-        ..Attr::default()
-    };
-    // SAFETY: `attr` is a valid, initialised perf_event_attr prefix whose
-    // `size` field states its length; pid 0 / cpu -1 is the calling thread
-    // on any CPU, group -1 and flags 0 open a standalone counter.
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_perf_event_open,
-            &attr as *const Attr,
-            0 as libc::pid_t,
-            -1 as libc::c_int,
-            -1 as libc::c_int,
-            0 as libc::c_ulong,
-        )
-    };
-    if fd < 0 {
-        bail!(
-            "perf_event_open(type {kind}, config {config}) failed: {} (check /proc/sys/kernel/perf_event_paranoid)",
-            std::io::Error::last_os_error()
-        );
-    }
-    // SAFETY: the syscall returned a new file descriptor that nothing else
-    // owns; the File takes ownership and closes it.
-    Ok(unsafe { File::from_raw_fd(fd as libc::c_int) })
-}
-
-fn read_counter(file: &mut File) -> anyhow::Result<u64> {
-    let mut bytes = [0u8; 8];
-    file.read_exact(&mut bytes)
-        .context("reading a performance counter")?;
-    Ok(u64::from_ne_bytes(bytes))
+/// Opens one counting event of the calling thread on any CPU, user space
+/// only (`perf-event2`'s defaults), and enables it.
+fn open_event(event: impl perf_event::events::Event) -> anyhow::Result<Counter> {
+    let mut counter = Builder::new(event)
+        .build()
+        .context("opening a performance counter (check /proc/sys/kernel/perf_event_paranoid)")?;
+    counter.enable().context("enabling a performance counter")?;
+    Ok(counter)
 }
 
 /// The two counters of one thread.  Must be read on the thread that
 /// opened them (they count that thread only).
 pub struct ThreadCounters {
-    cycles: File,
-    task_clock: File,
+    cycles: Counter,
+    task_clock: Counter,
 }
 
 /// One reading of [`ThreadCounters`].
@@ -124,8 +65,8 @@ impl ThreadCounters {
     /// virtual machine, or `perf_event_paranoid` above 2).
     pub fn open() -> anyhow::Result<Self> {
         Ok(Self {
-            cycles: open_event(TYPE_HARDWARE, HW_CPU_CYCLES)?,
-            task_clock: open_event(TYPE_SOFTWARE, SW_TASK_CLOCK)?,
+            cycles: open_event(Hardware::CPU_CYCLES)?,
+            task_clock: open_event(Software::TASK_CLOCK)?,
         })
     }
 
@@ -136,8 +77,8 @@ impl ThreadCounters {
     /// If a counter cannot be read.
     pub fn read(&mut self) -> anyhow::Result<Reading> {
         Ok(Reading {
-            cycles: read_counter(&mut self.cycles)?,
-            task_ns: read_counter(&mut self.task_clock)?,
+            cycles: self.cycles.read().context("reading the cycle counter")?,
+            task_ns: self.task_clock.read().context("reading the task clock")?,
         })
     }
 

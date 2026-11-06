@@ -18,26 +18,25 @@ fn read_trimmed(path: impl AsRef<Path>) -> Option<String> {
         .map(|text| text.trim().to_string())
 }
 
-/// The CPU flags of the first processor in `/proc/cpuinfo`.
+/// The CPU flags of the first processor in `/proc/cpuinfo` (`procfs`).
 ///
 /// # Errors
 ///
 /// If the file cannot be read or has no flags line.
 pub fn cpu_flags() -> anyhow::Result<Vec<String>> {
-    let text = std::fs::read_to_string("/proc/cpuinfo").context("reading /proc/cpuinfo")?;
-    let line = text
-        .lines()
-        .find(|line| line.starts_with("flags"))
-        .context("/proc/cpuinfo has no flags line")?;
-    let (_, flags) = line.split_once(':').context("malformed flags line")?;
-    Ok(flags.split_whitespace().map(str::to_string).collect())
+    use procfs::Current;
+    let info = procfs::CpuInfo::current().context("reading /proc/cpuinfo")?;
+    let flags = info.flags(0).context("/proc/cpuinfo has no flags line")?;
+    Ok(flags.into_iter().map(str::to_string).collect())
 }
 
-/// The CPU model name, if `/proc/cpuinfo` has one.
+/// The CPU model name, if `/proc/cpuinfo` has one (`procfs`).
 pub fn cpu_model() -> Option<String> {
-    let text = std::fs::read_to_string("/proc/cpuinfo").ok()?;
-    let line = text.lines().find(|line| line.starts_with("model name"))?;
-    Some(line.split_once(':')?.1.trim().to_string())
+    use procfs::Current;
+    procfs::CpuInfo::current()
+        .ok()?
+        .model_name(0)
+        .map(str::to_string)
 }
 
 /// The running kernel release.

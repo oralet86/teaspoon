@@ -15,20 +15,11 @@ const TOPOLOGY: &str = "/sys/devices/system/cpu";
 ///
 /// If the affinity mask cannot be read.
 pub fn allowed_cpus() -> anyhow::Result<Vec<usize>> {
-    // SAFETY: an all-zero cpu_set_t is a valid empty set.
-    let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
-    // SAFETY: `set` is a valid, writable cpu_set_t of the size passed.
-    let status =
-        unsafe { libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) };
-    if status != 0 {
-        bail!(
-            "sched_getaffinity failed: {}",
-            std::io::Error::last_os_error()
-        );
-    }
-    Ok((0..libc::CPU_SETSIZE as usize)
-        // SAFETY: `cpu` is below CPU_SETSIZE, the size of the set.
-        .filter(|&cpu| unsafe { libc::CPU_ISSET(cpu, &set) })
+    use nix::sched::{CpuSet, sched_getaffinity};
+    use nix::unistd::Pid;
+    let set = sched_getaffinity(Pid::from_raw(0)).context("sched_getaffinity")?;
+    Ok((0..CpuSet::count())
+        .filter(|&cpu| set.is_set(cpu).unwrap_or(false))
         .collect())
 }
 
@@ -77,21 +68,11 @@ pub fn physical_cores() -> anyhow::Result<Vec<usize>> {
 ///
 /// If the kernel refuses the affinity.
 pub fn pin_current_thread(cpu: usize) -> anyhow::Result<()> {
-    // SAFETY: an all-zero cpu_set_t is a valid empty set; CPU_SET writes
-    // inside it for cpu < CPU_SETSIZE, which is checked first.
-    let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
-    if cpu >= libc::CPU_SETSIZE as usize {
-        bail!("cpu {cpu} out of range");
-    }
-    unsafe { libc::CPU_SET(cpu, &mut set) };
-    // SAFETY: pid 0 is the calling thread; `set` is a valid cpu_set_t.
-    let status =
-        unsafe { libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) };
-    if status != 0 {
-        bail!(
-            "sched_setaffinity({cpu}) failed: {}",
-            std::io::Error::last_os_error()
-        );
-    }
-    Ok(())
+    use nix::sched::{CpuSet, sched_setaffinity};
+    use nix::unistd::Pid;
+    let mut set = CpuSet::new();
+    set.set(cpu)
+        .with_context(|| format!("cpu {cpu} out of range"))?;
+    sched_setaffinity(Pid::from_raw(0), &set)
+        .with_context(|| format!("sched_setaffinity({cpu}) failed"))
 }

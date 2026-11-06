@@ -39,15 +39,10 @@ pub fn stop() -> u64 {
 
 /// Nanoseconds of `CLOCK_MONOTONIC_RAW`.
 pub fn monotonic_raw_ns() -> u64 {
-    let mut time = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: `time` is a valid, writable timespec; the clock id is a
-    // constant the kernel supports since Linux 2.6.28.
-    let status = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC_RAW, &mut time) };
-    assert_eq!(status, 0, "clock_gettime(CLOCK_MONOTONIC_RAW) failed");
-    time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64
+    use nix::time::{ClockId, clock_gettime};
+    let time = clock_gettime(ClockId::CLOCK_MONOTONIC_RAW)
+        .expect("clock_gettime(CLOCK_MONOTONIC_RAW) failed (Linux 2.6.28 or later has it)");
+    time.tv_sec() as u64 * 1_000_000_000 + time.tv_nsec() as u64
 }
 
 /// Stops unless the CPU has an invariant counter (`constant_tsc`,
