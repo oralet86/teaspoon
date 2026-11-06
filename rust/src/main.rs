@@ -11,7 +11,6 @@ use clap::{Parser, Subcommand};
 use aos::experiments::{common, e0, marginal, population, rollouts, states};
 use aos::instance::Instance;
 use aos::instance::alpha::CACHE_DIRECTORY;
-use aos::instance::reference;
 use aos::timing::{machine, pin, tsc};
 
 /// Operator-selection experiments for the symmetric TSP.
@@ -41,12 +40,6 @@ enum Command {
         /// Parallel workers (default: every logical CPU).
         #[arg(long)]
         workers: Option<usize>,
-    },
-    /// Compare distances and candidate lists with the Python reference
-    /// (`rust/tools/export_reference.py`); fails on any exact mismatch.
-    Verify {
-        /// Directory written by the export script.
-        reference: PathBuf,
     },
     /// Calibrate the TSC clock and report the machine state.
     Clock,
@@ -94,12 +87,12 @@ enum Command {
     E1r(E1rArgs),
     /// Population runs (E2/E3 and the greedy-vs-softmax pilot).
     Population(PopulationArgs),
-    /// Compare two measurement-A results per state (robustness factors;
-    /// the Python reference when one side is a `cells.csv`).
+    /// Compare two measurement-A results per state (robustness factors,
+    /// or one run against another).
     Compare {
-        /// Main result: a measurement directory or a Python `cells.csv`.
+        /// Main result: a measurement directory.
         main: PathBuf,
-        /// Alternative result, same kinds.
+        /// Alternative result, a measurement directory.
         alternative: PathBuf,
         /// Output path without extension (`.parquet` and `.md` are written).
         #[arg(long)]
@@ -515,31 +508,6 @@ fn candidates(repository: &Path, paths: &[PathBuf], workers: Option<usize>) -> a
     Ok(())
 }
 
-fn verify(repository: &Path, reference: &Path) -> anyhow::Result<()> {
-    let cache = repository.join(CACHE_DIRECTORY);
-    let mut failed = Vec::new();
-    for file in reference::reference_files(reference)? {
-        let report = reference::verify(&file, repository, &cache)?;
-        println!(
-            "{}\tmatrix mismatches={}\tneighbour mismatches={}\talpha agreement={}",
-            report.name,
-            report.matrix_mismatches,
-            report.neighbour_mismatches,
-            report
-                .alpha_agreement
-                .map_or("n/a".to_string(), |share| format!("{:.1}%", 100.0 * share)),
-        );
-        if !report.passed() {
-            failed.push(report.name);
-        }
-    }
-    if !failed.is_empty() {
-        anyhow::bail!("reference mismatch for {failed:?}");
-    }
-    println!("all matrices and neighbour lists match the Python reference");
-    Ok(())
-}
-
 fn clock() -> anyhow::Result<()> {
     let clock = tsc::Clock::calibrate(5, 200)?;
     println!("{}", serde_json::to_string_pretty(&clock)?);
@@ -566,7 +534,6 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Instance { paths } => instance_info(&repository, &paths),
         Command::Candidates { paths, workers } => candidates(&repository, &paths, workers),
-        Command::Verify { reference } => verify(&repository, &reference),
         Command::Clock => clock(),
         Command::E0 {
             quick,
