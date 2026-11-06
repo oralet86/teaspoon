@@ -63,6 +63,12 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         contention_workers: Option<Vec<usize>>,
     },
+    /// Recompute the repeatability, contention and drift gates of a
+    /// finished E0 run with the current rules (into `<run>/gates/`).
+    E0Gates {
+        /// The run's `e0` output directory.
+        run: PathBuf,
+    },
     /// Build E1 states by local-optimality level (untimed, parallel).
     States {
         /// Instance paths relative to the repository root.
@@ -217,6 +223,14 @@ struct E1rArgs {
     /// Untimed threads of the run stage (0: every CPU).
     #[arg(long, default_value_t = 0)]
     workers: usize,
+    /// Calibrate only: take the cost models of this calibrated E1R run
+    /// instead of timing new ones, so both runs share one virtual clock.
+    #[arg(long)]
+    cost_models_from: Option<PathBuf>,
+    /// Analyse only: analyse the first K candidates of each state (greedy
+    /// first), writing to `analysis-top<K>/` inside the run.
+    #[arg(long)]
+    max_candidates: Option<usize>,
     /// Time even if boost is on or the governor is not `performance`.
     #[arg(long)]
     allow_unlocked_clock: bool,
@@ -260,9 +274,10 @@ fn e1r(repository: &Path, args: E1rArgs) -> anyhow::Result<()> {
             };
             rollouts::plan(repository, &directory, &settings)
         }
-        E1rStage::Calibrate => {
-            rollouts::calibrate(repository, &directory, args.allow_unlocked_clock)
-        }
+        E1rStage::Calibrate => match args.cost_models_from {
+            Some(source) => rollouts::reuse_calibration(&directory, &resolve(repository, &source)),
+            None => rollouts::calibrate(repository, &directory, args.allow_unlocked_clock),
+        },
         E1rStage::Run => rollouts::run(repository, &directory, args.workers),
         E1rStage::Validate => rollouts::validate(
             repository,
@@ -270,7 +285,7 @@ fn e1r(repository: &Path, args: E1rArgs) -> anyhow::Result<()> {
             args.validate_rollouts,
             args.allow_unlocked_clock,
         ),
-        E1rStage::Analyse => rollouts::analyse(repository, &directory),
+        E1rStage::Analyse => rollouts::analyse(repository, &directory, args.max_candidates),
     }
 }
 
@@ -525,6 +540,7 @@ fn clock() -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
+    aos::timing::disturb::keep_heap();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let cli = Cli::parse();
     let repository = cli
@@ -560,6 +576,11 @@ fn main() -> anyhow::Result<()> {
                 out.map(|path| resolve(&repository, &path)),
             )
             .map(|_| ())
+        }
+        Command::E0Gates { run } => {
+            let summary = e0::regate(&resolve(&repository, &run))?;
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+            Ok(())
         }
         Command::States {
             instances,
