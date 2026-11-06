@@ -286,9 +286,8 @@ pub fn column_bool(batch: &RecordBatch, name: &str) -> anyhow::Result<Vec<bool>>
     Ok((0..values.len()).map(|index| values.value(index)).collect())
 }
 
-/// Writes `batch` as CSV (header, then one line per row) to `out`,
-/// keeping only `columns` when given.  Values containing commas or quotes
-/// are quoted.
+/// Writes `batch` as CSV (header, then one line per row) to `out` with
+/// Arrow's CSV writer, keeping only `columns` when given; nulls are empty.
 ///
 /// # Errors
 ///
@@ -298,7 +297,6 @@ pub fn write_csv(
     columns: &[String],
     out: &mut impl std::io::Write,
 ) -> anyhow::Result<()> {
-    use arrow::util::display::{ArrayFormatter, FormatOptions};
     let schema = batch.schema();
     let indices: Vec<usize> = if columns.is_empty() {
         (0..batch.num_columns()).collect()
@@ -312,30 +310,13 @@ pub fn write_csv(
             })
             .collect::<anyhow::Result<_>>()?
     };
-    let options = FormatOptions::default().with_null("");
-    let formatters = indices
-        .iter()
-        .map(|&index| ArrayFormatter::try_new(batch.column(index).as_ref(), &options))
-        .collect::<Result<Vec<_>, _>>()?;
-    let quote = |text: String| {
-        if text.contains([',', '"', '\n']) {
-            format!("\"{}\"", text.replace('"', "\"\""))
-        } else {
-            text
-        }
-    };
-    let header: Vec<String> = indices
-        .iter()
-        .map(|&index| quote(schema.field(index).name().clone()))
-        .collect();
-    writeln!(out, "{}", header.join(","))?;
-    for row in 0..batch.num_rows() {
-        let line: Vec<String> = formatters
-            .iter()
-            .map(|formatter| quote(formatter.value(row).to_string()))
-            .collect();
-        writeln!(out, "{}", line.join(","))?;
-    }
+    let mut writer = arrow::csv::WriterBuilder::new()
+        .with_header(true)
+        .with_null(String::new())
+        .build(out);
+    writer
+        .write(&batch.project(&indices)?)
+        .context("writing csv")?;
     Ok(())
 }
 

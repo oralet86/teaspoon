@@ -27,22 +27,7 @@ pub fn new_run_directory(root: &Path, experiment: &str, unlocked: bool) -> anyho
 
 /// Local time as `YYYYmmdd-HHMMSS`, like the Python run directories.
 pub fn timestamp() -> String {
-    // SAFETY: `time(NULL)` has no preconditions; `localtime_r` writes into
-    // the valid `tm` it is given.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe {
-        let now = libc::time(std::ptr::null_mut());
-        libc::localtime_r(&now, &mut tm);
-    }
-    format!(
-        "{:04}{:02}{:02}-{:02}{:02}{:02}",
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec
-    )
+    jiff::Zoned::now().strftime("%Y%m%d-%H%M%S").to_string()
 }
 
 /// Writes `contents` to `path` atomically: a temporary file, then rename.
