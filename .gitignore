@@ -10,7 +10,7 @@ data
 # LKH-3 and CONCORDE that I'm not allowed to redistribute.
 vendor
 # hypothesis .md files
-experiments
+/experiments
 # run files
 runs
 
@@ -81,7 +81,7 @@ db.sqlite3
 db.sqlite3-journal
 
 # Flask stuff:
-instance/
+/instance/
 .webassets-cache
 
 # Scrapy stuff:
