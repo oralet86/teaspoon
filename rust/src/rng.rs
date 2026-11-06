@@ -92,6 +92,11 @@ impl Stream {
         (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }
 
+    /// One draw from a `rand` distribution, with this stream's generator.
+    pub fn sample_from<T>(&mut self, distribution: &impl rand::distr::Distribution<T>) -> T {
+        distribution.sample(&mut self.0)
+    }
+
     /// Shuffles `items` in place (Fisher-Yates).
     pub fn shuffle<T>(&mut self, items: &mut [T]) {
         for last in (1..items.len()).rev() {
