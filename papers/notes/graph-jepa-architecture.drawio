@@ -1,0 +1,193 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" modified="2026-11-09T12:00:00.000Z" agent="opencode" version="24.7.17" type="device">
+  <diagram id="graph-jepa-architecture" name="Graph-JEPA architecture">
+    <mxGraphModel dx="1700" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Graph-JEPA instance-level configuration for LKH / EAX — proposed architecture" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1a1a1a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="14" width="1600" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="From new.md: four stages, offline labels, and a strict wall-clock evaluation. Pink notes mark the main open risks." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="42" y="50" width="1300" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="stage1" value="Stage I — Spatial coarsening" style="rounded=1;arcSize=2;fillColor=#f7f7f7;strokeColor=#666666;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontStyle=1;fontSize=14;fontColor=#222222;rounded=1;arcSize=4;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="95" width="260" height="640" as="geometry" />
+        </mxCell>
+        <mxCell id="stage2" value="Stage II — Graph-JEPA" style="rounded=1;arcSize=2;fillColor=#f7f7f7;strokeColor=#666666;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontStyle=1;fontSize=14;fontColor=#222222;rounded=1;arcSize=4;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="325" y="95" width="300" height="640" as="geometry" />
+        </mxCell>
+        <mxCell id="stage3" value="Stage III — Solver necks" style="rounded=1;arcSize=2;fillColor=#f7f7f7;strokeColor=#666666;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontStyle=1;fontSize=14;fontColor=#222222;rounded=1;arcSize=4;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="650" y="95" width="330" height="640" as="geometry" />
+        </mxCell>
+        <mxCell id="stage4" value="Stage IV — Meta-router" style="rounded=1;arcSize=2;fillColor=#f7f7f7;strokeColor=#666666;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontStyle=1;fontSize=14;fontColor=#222222;rounded=1;arcSize=4;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="1005" y="95" width="330" height="640" as="geometry" />
+        </mxCell>
+        <mxCell id="stage5" value="Stage V — Execution" style="rounded=1;arcSize=2;fillColor=#f7f7f7;strokeColor=#666666;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontStyle=1;fontSize=14;fontColor=#222222;rounded=1;arcSize=4;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1360" y="95" width="280" height="640" as="geometry" />
+        </mxCell>
+        <mxCell id="input" value="TSP instance&#10;N = 10k–100k&#10;node coordinates" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fontFamily=Helvetica;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="150" width="220" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="sample" value="Spatial hashing /&#10;localized random walks" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="265" width="220" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="knn" value="k-NN graph inside samples&#10;(bounded-size proxy)" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="370" width="220" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="proxy" value="Proxy graph G'&#10;cluster density,&#10;MST / bottleneck statistics" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="475" width="220" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="risk1" value="Open risk: an o(N) sample can miss global clusters and bottlenecks. The claim that it preserves enough structure is an assumption, not a result." style="rounded=1;arcSize=6;fillColor=#fce4ec;strokeColor=#c2185b;strokeWidth=1;dashed=1;html=1;whiteSpace=wrap;fontSize=10;fontColor=#7b1238;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="580" width="220" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="context" value="Visible context subgraph&#10;(masked regions held out)" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="345" y="150" width="260" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="encoder" value="Graph encoder&#10;(GNN / Graph-JEPA)" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="345" y="250" width="260" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="predictor" value="Latent predictor&#10;predicts masked-subgraph&#10;embeddings (stop-grad target)" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="345" y="350" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="hG" value="Global embedding&#10;h_G ∈ ℝ^d" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="345" y="475" width="260" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ssl" value="Self-supervised objective: masked latent prediction. This stage needs no configuration labels." style="rounded=1;arcSize=6;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=1;dashed=1;html=1;whiteSpace=wrap;fontSize=10;fontColor=#5c4a00;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="345" y="585" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="lkh" value="LKH neck (MLP)&#10;θ_LKH = (MOVE_TYPE, PATCHING_A,&#10;MAX_CANDIDATES, RUNS)" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="670" y="150" width="290" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="eax" value="EAX neck (MLP)&#10;θ_EAX = (N_pop, N_ch,&#10;initial sub-tour heuristic)" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="670" y="290" width="290" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="necknote" value="One configuration per solver. Both necks are trained on offline tuning labels (bottom panel)." style="rounded=1;arcSize=6;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=1;dashed=1;html=1;whiteSpace=wrap;fontSize=10;fontColor=#5c4a00;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="670" y="430" width="290" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="zlkh" value="z_LKH = [ h_G ; θ_LKH ]" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1025" y="150" width="290" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="zeax" value="z_EAX = [ h_G ; θ_EAX ]" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1025" y="250" width="290" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="heads" value="Prediction heads&#10;Q̂_i: expected tour length / gap&#10;T̂_i: expected runtime" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1025" y="350" width="290" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="objective" value="Select (solver*, θ*)&#10;argmin_i ( Q̂_i + λ log T̂_i )" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1025" y="470" width="290" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="risk2" value="Open risk: θ_i and h_G come from the same embedding, so the router cannot compare counterfactual configurations. Needs candidate configs or a (graph, config) performance model." style="rounded=1;arcSize=6;fillColor=#fce4ec;strokeColor=#c2185b;strokeWidth=1;dashed=1;html=1;whiteSpace=wrap;fontSize=10;fontColor=#7b1238;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1025" y="580" width="290" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="run" value="Run selected solver&#10;LKH or EAX with θ*&#10;on the FULL instance" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="150" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="output" value="Tour, gap, and&#10;total wall-clock time" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="270" width="240" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="metric" value="Metric: time to 1% gap&#10;= t_graph + t_infer + t_solver" style="whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=11;fillColor=#ffffff;strokeColor=#555555;strokeWidth=1;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="375" width="240" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="baselines" value="Baselines:&#10;default LKH / EAX&#10;NeuroLKH&#10;static irace config&#10;per-instance oracle" style="rounded=1;arcSize=6;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=1;dashed=1;html=1;whiteSpace=wrap;fontSize=10;fontColor=#5c4a00;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="505" width="240" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="e_input_sample" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="input" target="sample">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_sample_knn" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="sample" target="knn">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_knn_proxy" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="knn" target="proxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_proxy_encoder" value="proxy graph" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="proxy" target="encoder">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_encoder_pred" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="encoder" target="predictor">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_pred_hg" value="h_G" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="predictor" target="hG">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_hg_lkh" value="h_G" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=0.25;entryX=0;entryY=0.5;" edge="1" parent="1" source="hG" target="lkh">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_hg_eax" value="h_G" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=0.75;entryX=0;entryY=0.5;" edge="1" parent="1" source="hG" target="eax">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lkh_z" value="θ_LKH" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="lkh" target="zlkh">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="990" y="195" />
+              <mxPoint x="990" y="185" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_eax_z" value="θ_EAX" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="eax" target="zeax">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="990" y="335" />
+              <mxPoint x="990" y="285" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_zlkh_heads" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="zlkh" target="heads">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1000" y="185" />
+              <mxPoint x="1000" y="395" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_zeax_heads" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=0.65;exitY=1;entryX=0.65;entryY=0;" edge="1" parent="1" source="zeax" target="heads">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1213" y="320" />
+              <mxPoint x="1213" y="350" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_heads_obj" value="Q̂_i, T̂_i" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="heads" target="objective">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_obj_run" value="solver*, θ*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="objective" target="run">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_run_out" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="run" target="output">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_out_metric" value="evaluate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="output" target="metric">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="trainpanel" value="Training and labels (offline; no gradients through solver execution)" style="rounded=1;arcSize=2;fillColor=#f7f7f7;strokeColor=#666666;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontStyle=1;fontSize=14;fontColor=#222222;fillColor=#fafafa;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="40" y="770" width="1600" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="ssl_box" value="Graph-JEPA pretraining&#10;masked subgraphs on unlabeled TSP;&#10;no configuration labels" style="rounded=1;arcSize=6;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=1;dashed=1;html=1;whiteSpace=wrap;fontSize=10;fontColor=#5c4a00;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="345" y="815" width="300" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="labels_box" value="Offline irace / SMAC sweeps&#10;on training instances&#10;→ (θ_i, Q_i, T_i) labels" style="rounded=1;arcSize=6;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=1;dashed=1;html=1;whiteSpace=wrap;fontSize=10;fontColor=#5c4a00;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="700" y="815" width="420" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="targets_box" value="Supervised targets&#10;necks: regress θ_i&#10;router: regress Q_i, T_i&#10;(or ranking / censored time-to-target)" style="rounded=1;arcSize=6;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=1;dashed=1;html=1;whiteSpace=wrap;fontSize=10;fontColor=#5c4a00;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="815" width="400" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="trainnote" value="The solver is a black box: train the necks and router on logged runs, then deploy on unseen instances." style="rounded=1;arcSize=6;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=1;dashed=1;html=1;whiteSpace=wrap;fontSize=10;fontColor=#5c4a00;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="815" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ssl" value="pretrain" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;dashed=1;strokeColor=#9673a6;" edge="1" parent="1" source="ssl_box" target="stage2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_labels_necks" value="θ labels" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;dashed=1;strokeColor=#82b366;" edge="1" parent="1" source="labels_box" target="stage3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_labels_router" value="Q, T labels" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;dashed=1;strokeColor=#d79b00;" edge="1" parent="1" source="labels_box" target="stage4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_targets" value="targets" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#4d4d4d;strokeWidth=1.5;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;dashed=1;strokeColor=#d79b00;" edge="1" parent="1" source="targets_box" target="stage4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,422 @@
+run,class,slices,operator,states,share_of_untied,tied_states
+R2,2-opt open,1,three_opt_nl,70,0.389,0
+R2,2-opt open,1,kick,46,0.256,0
+R2,2-opt open,1,lin_kernighan_alpha,28,0.156,0
+R2,2-opt open,1,double_bridge_local,17,0.094,0
+R2,2-opt open,1,double_bridge,7,0.039,0
+R2,2-opt open,1,lk_kick,6,0.033,0
+R2,2-opt open,1,lin_kernighan,5,0.028,0
+R2,2-opt open,1,or_opt_nl,1,0.006,0
+R2,2-opt open,8,lk_kick,40,0.231,7
+R2,2-opt open,8,kick,36,0.208,7
+R2,2-opt open,8,three_opt_nl,30,0.173,7
+R2,2-opt open,8,lin_kernighan_alpha,17,0.098,7
+R2,2-opt open,8,double_bridge,17,0.098,7
+R2,2-opt open,8,two_opt_first,7,0.04,7
+R2,2-opt open,8,double_bridge_local,7,0.04,7
+R2,2-opt open,8,or_opt_nl,5,0.029,7
+R2,2-opt open,8,two_opt_descent,4,0.023,7
+R2,2-opt open,8,two_opt_alpha,4,0.023,7
+R2,2-opt open,8,lin_kernighan,4,0.023,7
+R2,2-opt open,8,string_removal,1,0.006,7
+R2,2-opt open,8,ruin_recreate,1,0.006,7
+R2,2-opt open,64,lk_kick,48,0.327,33
+R2,2-opt open,64,kick,13,0.088,33
+R2,2-opt open,64,three_opt_nl,13,0.088,33
+R2,2-opt open,64,two_opt_first,12,0.082,33
+R2,2-opt open,64,lin_kernighan_alpha,10,0.068,33
+R2,2-opt open,64,double_bridge_local,8,0.054,33
+R2,2-opt open,64,two_opt_descent,6,0.041,33
+R2,2-opt open,64,double_bridge,6,0.041,33
+R2,2-opt open,64,lin_kernighan,6,0.041,33
+R2,2-opt open,64,two_opt_alpha,5,0.034,33
+R2,2-opt open,64,two_opt_nl,4,0.027,33
+R2,2-opt open,64,ruin_recreate,4,0.027,33
+R2,2-opt open,64,or_opt_nl,4,0.027,33
+R2,2-opt open,64,two_opt_targeted,4,0.027,33
+R2,2-opt open,64,swap,2,0.014,33
+R2,2-opt open,64,string_removal,2,0.014,33
+R2,2-opt optimum,1,kick,43,0.326,0
+R2,2-opt optimum,1,lin_kernighan_alpha,43,0.326,0
+R2,2-opt optimum,1,three_opt_nl,25,0.189,0
+R2,2-opt optimum,1,double_bridge_local,15,0.114,0
+R2,2-opt optimum,1,lk_kick,5,0.038,0
+R2,2-opt optimum,1,lin_kernighan,1,0.008,0
+R2,2-opt optimum,8,lk_kick,34,0.268,5
+R2,2-opt optimum,8,kick,26,0.205,5
+R2,2-opt optimum,8,lin_kernighan_alpha,26,0.205,5
+R2,2-opt optimum,8,double_bridge,12,0.094,5
+R2,2-opt optimum,8,lin_kernighan,12,0.094,5
+R2,2-opt optimum,8,three_opt_nl,8,0.063,5
+R2,2-opt optimum,8,double_bridge_local,5,0.039,5
+R2,2-opt optimum,8,ruin_recreate,4,0.031,5
+R2,2-opt optimum,64,lk_kick,32,0.311,29
+R2,2-opt optimum,64,double_bridge,13,0.126,29
+R2,2-opt optimum,64,lin_kernighan_alpha,11,0.107,29
+R2,2-opt optimum,64,three_opt_nl,10,0.097,29
+R2,2-opt optimum,64,double_bridge_local,9,0.087,29
+R2,2-opt optimum,64,kick,9,0.087,29
+R2,2-opt optimum,64,lin_kernighan,8,0.078,29
+R2,2-opt optimum,64,string_removal,5,0.049,29
+R2,2-opt optimum,64,ruin_recreate,4,0.039,29
+R2,2-opt optimum,64,or_opt_nl,2,0.019,29
+R2,3-opt optimum,1,lin_kernighan_alpha,40,0.385,0
+R2,3-opt optimum,1,kick,39,0.375,0
+R2,3-opt optimum,1,double_bridge_local,14,0.135,0
+R2,3-opt optimum,1,lk_kick,4,0.038,0
+R2,3-opt optimum,1,lin_kernighan,4,0.038,0
+R2,3-opt optimum,1,ruin_recreate,2,0.019,0
+R2,3-opt optimum,1,double_bridge,1,0.01,0
+R2,3-opt optimum,8,lk_kick,34,0.343,5
+R2,3-opt optimum,8,lin_kernighan_alpha,20,0.202,5
+R2,3-opt optimum,8,kick,14,0.141,5
+R2,3-opt optimum,8,lin_kernighan,12,0.121,5
+R2,3-opt optimum,8,double_bridge,7,0.071,5
+R2,3-opt optimum,8,double_bridge_local,5,0.051,5
+R2,3-opt optimum,8,ruin_recreate,4,0.04,5
+R2,3-opt optimum,8,string_removal,3,0.03,5
+R2,3-opt optimum,64,lk_kick,26,0.302,18
+R2,3-opt optimum,64,double_bridge,13,0.151,18
+R2,3-opt optimum,64,double_bridge_local,11,0.128,18
+R2,3-opt optimum,64,kick,10,0.116,18
+R2,3-opt optimum,64,lin_kernighan_alpha,10,0.116,18
+R2,3-opt optimum,64,string_removal,7,0.081,18
+R2,3-opt optimum,64,lin_kernighan,6,0.07,18
+R2,3-opt optimum,64,ruin_recreate,3,0.035,18
+R2,LK optimum,1,lk_kick,43,0.319,5
+R2,LK optimum,1,kick,36,0.267,5
+R2,LK optimum,1,double_bridge,19,0.141,5
+R2,LK optimum,1,double_bridge_local,16,0.119,5
+R2,LK optimum,1,lin_kernighan,15,0.111,5
+R2,LK optimum,1,string_removal,3,0.022,5
+R2,LK optimum,1,ruin_recreate,3,0.022,5
+R2,LK optimum,8,lk_kick,67,0.489,3
+R2,LK optimum,8,kick,22,0.161,3
+R2,LK optimum,8,double_bridge,17,0.124,3
+R2,LK optimum,8,lin_kernighan,13,0.095,3
+R2,LK optimum,8,double_bridge_local,12,0.088,3
+R2,LK optimum,8,string_removal,4,0.029,3
+R2,LK optimum,8,ruin_recreate,2,0.015,3
+R2,LK optimum,64,lk_kick,54,0.454,21
+R2,LK optimum,64,kick,16,0.134,21
+R2,LK optimum,64,double_bridge,12,0.101,21
+R2,LK optimum,64,ruin_recreate,12,0.101,21
+R2,LK optimum,64,lin_kernighan,9,0.076,21
+R2,LK optimum,64,double_bridge_local,9,0.076,21
+R2,LK optimum,64,string_removal,7,0.059,21
+R2,all,1,kick,164,0.298,5
+R2,all,1,lin_kernighan_alpha,111,0.201,5
+R2,all,1,three_opt_nl,95,0.172,5
+R2,all,1,double_bridge_local,62,0.113,5
+R2,all,1,lk_kick,58,0.105,5
+R2,all,1,double_bridge,27,0.049,5
+R2,all,1,lin_kernighan,25,0.045,5
+R2,all,1,ruin_recreate,5,0.009,5
+R2,all,1,string_removal,3,0.005,5
+R2,all,1,or_opt_nl,1,0.002,5
+R2,all,8,lk_kick,175,0.326,20
+R2,all,8,kick,98,0.183,20
+R2,all,8,lin_kernighan_alpha,63,0.118,20
+R2,all,8,double_bridge,53,0.099,20
+R2,all,8,lin_kernighan,41,0.076,20
+R2,all,8,three_opt_nl,38,0.071,20
+R2,all,8,double_bridge_local,29,0.054,20
+R2,all,8,ruin_recreate,11,0.021,20
+R2,all,8,string_removal,8,0.015,20
+R2,all,8,two_opt_first,7,0.013,20
+R2,all,8,or_opt_nl,5,0.009,20
+R2,all,8,two_opt_descent,4,0.007,20
+R2,all,8,two_opt_alpha,4,0.007,20
+R2,all,64,lk_kick,160,0.352,101
+R2,all,64,kick,48,0.105,101
+R2,all,64,double_bridge,44,0.097,101
+R2,all,64,double_bridge_local,37,0.081,101
+R2,all,64,lin_kernighan_alpha,31,0.068,101
+R2,all,64,lin_kernighan,29,0.064,101
+R2,all,64,three_opt_nl,23,0.051,101
+R2,all,64,ruin_recreate,23,0.051,101
+R2,all,64,string_removal,21,0.046,101
+R2,all,64,two_opt_first,12,0.026,101
+R2,all,64,two_opt_descent,6,0.013,101
+R2,all,64,or_opt_nl,6,0.013,101
+R2,all,64,two_opt_alpha,5,0.011,101
+R2,all,64,two_opt_nl,4,0.009,101
+R2,all,64,two_opt_targeted,4,0.009,101
+R2,all,64,swap,2,0.004,101
+R1,2-opt open,1,kick,94,0.525,1
+R1,2-opt open,1,lk_kick,55,0.307,1
+R1,2-opt open,1,lin_kernighan_alpha,13,0.073,1
+R1,2-opt open,1,lin_kernighan,10,0.056,1
+R1,2-opt open,1,double_bridge,3,0.017,1
+R1,2-opt open,1,double_bridge_local,3,0.017,1
+R1,2-opt open,1,ruin_recreate,1,0.006,1
+R1,2-opt open,8,lk_kick,49,0.343,37
+R1,2-opt open,8,kick,32,0.224,37
+R1,2-opt open,8,lin_kernighan_alpha,20,0.14,37
+R1,2-opt open,8,lin_kernighan,11,0.077,37
+R1,2-opt open,8,double_bridge,10,0.07,37
+R1,2-opt open,8,double_bridge_local,6,0.042,37
+R1,2-opt open,8,two_opt_first,5,0.035,37
+R1,2-opt open,8,three_opt_nl,4,0.028,37
+R1,2-opt open,8,two_opt_nl,1,0.007,37
+R1,2-opt open,8,swap,1,0.007,37
+R1,2-opt open,8,two_opt_alpha,1,0.007,37
+R1,2-opt open,8,two_opt_descent,1,0.007,37
+R1,2-opt open,8,two_opt_targeted,1,0.007,37
+R1,2-opt open,8,string_removal,1,0.007,37
+R1,2-opt open,64,lk_kick,20,0.198,79
+R1,2-opt open,64,kick,17,0.168,79
+R1,2-opt open,64,lin_kernighan_alpha,10,0.099,79
+R1,2-opt open,64,double_bridge_local,10,0.099,79
+R1,2-opt open,64,two_opt_targeted,5,0.05,79
+R1,2-opt open,64,double_bridge,5,0.05,79
+R1,2-opt open,64,ruin_recreate,5,0.05,79
+R1,2-opt open,64,string_removal,5,0.05,79
+R1,2-opt open,64,lin_kernighan,5,0.05,79
+R1,2-opt open,64,two_opt_alpha,4,0.04,79
+R1,2-opt open,64,or_opt_nl,4,0.04,79
+R1,2-opt open,64,two_opt_first,4,0.04,79
+R1,2-opt open,64,two_opt_descent,2,0.02,79
+R1,2-opt open,64,two_opt_nl,2,0.02,79
+R1,2-opt open,64,three_opt_nl,2,0.02,79
+R1,2-opt open,64,swap,1,0.01,79
+R1,2-opt optimum,1,lk_kick,51,0.402,5
+R1,2-opt optimum,1,kick,45,0.354,5
+R1,2-opt optimum,1,lin_kernighan,12,0.094,5
+R1,2-opt optimum,1,lin_kernighan_alpha,10,0.079,5
+R1,2-opt optimum,1,double_bridge,5,0.039,5
+R1,2-opt optimum,1,double_bridge_local,2,0.016,5
+R1,2-opt optimum,1,ruin_recreate,1,0.008,5
+R1,2-opt optimum,1,string_removal,1,0.008,5
+R1,2-opt optimum,8,lk_kick,33,0.32,29
+R1,2-opt optimum,8,lin_kernighan_alpha,17,0.165,29
+R1,2-opt optimum,8,kick,15,0.146,29
+R1,2-opt optimum,8,lin_kernighan,14,0.136,29
+R1,2-opt optimum,8,double_bridge,12,0.117,29
+R1,2-opt optimum,8,double_bridge_local,5,0.049,29
+R1,2-opt optimum,8,ruin_recreate,3,0.029,29
+R1,2-opt optimum,8,three_opt_nl,3,0.029,29
+R1,2-opt optimum,8,string_removal,1,0.01,29
+R1,2-opt optimum,64,lk_kick,17,0.27,69
+R1,2-opt optimum,64,kick,8,0.127,69
+R1,2-opt optimum,64,lin_kernighan_alpha,8,0.127,69
+R1,2-opt optimum,64,double_bridge_local,7,0.111,69
+R1,2-opt optimum,64,lin_kernighan,7,0.111,69
+R1,2-opt optimum,64,string_removal,5,0.079,69
+R1,2-opt optimum,64,ruin_recreate,4,0.063,69
+R1,2-opt optimum,64,three_opt_nl,3,0.048,69
+R1,2-opt optimum,64,double_bridge,3,0.048,69
+R1,2-opt optimum,64,or_opt_nl,1,0.016,69
+R1,3-opt optimum,1,lk_kick,40,0.404,5
+R1,3-opt optimum,1,kick,38,0.384,5
+R1,3-opt optimum,1,lin_kernighan_alpha,11,0.111,5
+R1,3-opt optimum,1,lin_kernighan,8,0.081,5
+R1,3-opt optimum,1,double_bridge,1,0.01,5
+R1,3-opt optimum,1,double_bridge_local,1,0.01,5
+R1,3-opt optimum,8,lk_kick,32,0.4,24
+R1,3-opt optimum,8,kick,15,0.188,24
+R1,3-opt optimum,8,lin_kernighan_alpha,13,0.163,24
+R1,3-opt optimum,8,lin_kernighan,9,0.113,24
+R1,3-opt optimum,8,double_bridge,5,0.062,24
+R1,3-opt optimum,8,double_bridge_local,4,0.05,24
+R1,3-opt optimum,8,ruin_recreate,1,0.013,24
+R1,3-opt optimum,8,string_removal,1,0.013,24
+R1,3-opt optimum,64,lk_kick,12,0.211,47
+R1,3-opt optimum,64,lin_kernighan_alpha,10,0.175,47
+R1,3-opt optimum,64,kick,8,0.14,47
+R1,3-opt optimum,64,double_bridge_local,8,0.14,47
+R1,3-opt optimum,64,lin_kernighan,7,0.123,47
+R1,3-opt optimum,64,double_bridge,6,0.105,47
+R1,3-opt optimum,64,string_removal,3,0.053,47
+R1,3-opt optimum,64,ruin_recreate,3,0.053,47
+R1,LK optimum,1,lk_kick,78,0.569,3
+R1,LK optimum,1,kick,39,0.285,3
+R1,LK optimum,1,lin_kernighan,9,0.066,3
+R1,LK optimum,1,double_bridge_local,5,0.036,3
+R1,LK optimum,1,ruin_recreate,3,0.022,3
+R1,LK optimum,1,double_bridge,2,0.015,3
+R1,LK optimum,1,string_removal,1,0.007,3
+R1,LK optimum,8,lk_kick,80,0.65,17
+R1,LK optimum,8,kick,13,0.106,17
+R1,LK optimum,8,lin_kernighan,8,0.065,17
+R1,LK optimum,8,double_bridge,7,0.057,17
+R1,LK optimum,8,string_removal,6,0.049,17
+R1,LK optimum,8,double_bridge_local,5,0.041,17
+R1,LK optimum,8,ruin_recreate,4,0.033,17
+R1,LK optimum,64,lk_kick,53,0.525,39
+R1,LK optimum,64,lin_kernighan,14,0.139,39
+R1,LK optimum,64,kick,12,0.119,39
+R1,LK optimum,64,double_bridge,9,0.089,39
+R1,LK optimum,64,string_removal,6,0.059,39
+R1,LK optimum,64,double_bridge_local,6,0.059,39
+R1,LK optimum,64,ruin_recreate,1,0.01,39
+R1,all,1,lk_kick,224,0.413,14
+R1,all,1,kick,216,0.399,14
+R1,all,1,lin_kernighan,39,0.072,14
+R1,all,1,lin_kernighan_alpha,34,0.063,14
+R1,all,1,double_bridge_local,11,0.02,14
+R1,all,1,double_bridge,11,0.02,14
+R1,all,1,ruin_recreate,5,0.009,14
+R1,all,1,string_removal,2,0.004,14
+R1,all,8,lk_kick,194,0.432,107
+R1,all,8,kick,75,0.167,107
+R1,all,8,lin_kernighan_alpha,50,0.111,107
+R1,all,8,lin_kernighan,42,0.094,107
+R1,all,8,double_bridge,34,0.076,107
+R1,all,8,double_bridge_local,20,0.045,107
+R1,all,8,string_removal,9,0.02,107
+R1,all,8,ruin_recreate,8,0.018,107
+R1,all,8,three_opt_nl,7,0.016,107
+R1,all,8,two_opt_first,5,0.011,107
+R1,all,8,two_opt_nl,1,0.002,107
+R1,all,8,swap,1,0.002,107
+R1,all,8,two_opt_alpha,1,0.002,107
+R1,all,8,two_opt_descent,1,0.002,107
+R1,all,8,two_opt_targeted,1,0.002,107
+R1,all,64,lk_kick,102,0.317,234
+R1,all,64,kick,45,0.14,234
+R1,all,64,lin_kernighan,33,0.102,234
+R1,all,64,double_bridge_local,31,0.096,234
+R1,all,64,lin_kernighan_alpha,28,0.087,234
+R1,all,64,double_bridge,23,0.071,234
+R1,all,64,string_removal,19,0.059,234
+R1,all,64,ruin_recreate,13,0.04,234
+R1,all,64,two_opt_targeted,5,0.016,234
+R1,all,64,three_opt_nl,5,0.016,234
+R1,all,64,or_opt_nl,5,0.016,234
+R1,all,64,two_opt_alpha,4,0.012,234
+R1,all,64,two_opt_first,4,0.012,234
+R1,all,64,two_opt_descent,2,0.006,234
+R1,all,64,two_opt_nl,2,0.006,234
+R1,all,64,swap,1,0.003,234
+R3,2-opt open,1,lk_kick,123,0.75,16
+R3,2-opt open,1,kick,29,0.177,16
+R3,2-opt open,1,lin_kernighan,7,0.043,16
+R3,2-opt open,1,lin_kernighan_alpha,2,0.012,16
+R3,2-opt open,1,string_removal,1,0.006,16
+R3,2-opt open,1,double_bridge_local,1,0.006,16
+R3,2-opt open,1,ruin_recreate,1,0.006,16
+R3,2-opt open,8,lk_kick,56,0.533,75
+R3,2-opt open,8,kick,13,0.124,75
+R3,2-opt open,8,lin_kernighan,12,0.114,75
+R3,2-opt open,8,lin_kernighan_alpha,9,0.086,75
+R3,2-opt open,8,double_bridge,4,0.038,75
+R3,2-opt open,8,string_removal,3,0.029,75
+R3,2-opt open,8,double_bridge_local,3,0.029,75
+R3,2-opt open,8,three_opt_nl,2,0.019,75
+R3,2-opt open,8,two_opt_first,2,0.019,75
+R3,2-opt open,8,two_opt_descent,1,0.01,75
+R3,2-opt open,64,lk_kick,34,0.4,95
+R3,2-opt open,64,double_bridge,9,0.106,95
+R3,2-opt open,64,kick,7,0.082,95
+R3,2-opt open,64,lin_kernighan_alpha,6,0.071,95
+R3,2-opt open,64,double_bridge_local,5,0.059,95
+R3,2-opt open,64,three_opt_nl,4,0.047,95
+R3,2-opt open,64,two_opt_nl,3,0.035,95
+R3,2-opt open,64,two_opt_targeted,3,0.035,95
+R3,2-opt open,64,lin_kernighan,3,0.035,95
+R3,2-opt open,64,or_opt_nl,3,0.035,95
+R3,2-opt open,64,string_removal,2,0.024,95
+R3,2-opt open,64,two_opt_first,2,0.024,95
+R3,2-opt open,64,ruin_recreate,1,0.012,95
+R3,2-opt open,64,two_opt_descent,1,0.012,95
+R3,2-opt open,64,two_opt_alpha,1,0.012,95
+R3,2-opt open,64,swap,1,0.012,95
+R3,2-opt optimum,1,lk_kick,99,0.825,12
+R3,2-opt optimum,1,kick,11,0.092,12
+R3,2-opt optimum,1,lin_kernighan,6,0.05,12
+R3,2-opt optimum,1,double_bridge,2,0.017,12
+R3,2-opt optimum,1,ruin_recreate,2,0.017,12
+R3,2-opt optimum,8,lk_kick,33,0.478,63
+R3,2-opt optimum,8,double_bridge,8,0.116,63
+R3,2-opt optimum,8,lin_kernighan_alpha,8,0.116,63
+R3,2-opt optimum,8,kick,4,0.058,63
+R3,2-opt optimum,8,three_opt_nl,4,0.058,63
+R3,2-opt optimum,8,lin_kernighan,4,0.058,63
+R3,2-opt optimum,8,double_bridge_local,4,0.058,63
+R3,2-opt optimum,8,string_removal,2,0.029,63
+R3,2-opt optimum,8,ruin_recreate,2,0.029,63
+R3,2-opt optimum,64,lk_kick,11,0.239,86
+R3,2-opt optimum,64,kick,8,0.174,86
+R3,2-opt optimum,64,three_opt_nl,6,0.13,86
+R3,2-opt optimum,64,double_bridge,6,0.13,86
+R3,2-opt optimum,64,lin_kernighan_alpha,6,0.13,86
+R3,2-opt optimum,64,string_removal,5,0.109,86
+R3,2-opt optimum,64,double_bridge_local,2,0.043,86
+R3,2-opt optimum,64,ruin_recreate,1,0.022,86
+R3,2-opt optimum,64,lin_kernighan,1,0.022,86
+R3,3-opt optimum,1,lk_kick,68,0.731,11
+R3,3-opt optimum,1,kick,14,0.151,11
+R3,3-opt optimum,1,lin_kernighan,6,0.065,11
+R3,3-opt optimum,1,double_bridge,2,0.022,11
+R3,3-opt optimum,1,lin_kernighan_alpha,2,0.022,11
+R3,3-opt optimum,1,ruin_recreate,1,0.011,11
+R3,3-opt optimum,8,lk_kick,29,0.483,44
+R3,3-opt optimum,8,lin_kernighan,8,0.133,44
+R3,3-opt optimum,8,double_bridge,8,0.133,44
+R3,3-opt optimum,8,lin_kernighan_alpha,7,0.117,44
+R3,3-opt optimum,8,kick,6,0.1,44
+R3,3-opt optimum,8,double_bridge_local,2,0.033,44
+R3,3-opt optimum,64,lk_kick,10,0.222,59
+R3,3-opt optimum,64,double_bridge,10,0.222,59
+R3,3-opt optimum,64,lin_kernighan_alpha,9,0.2,59
+R3,3-opt optimum,64,lin_kernighan,5,0.111,59
+R3,3-opt optimum,64,kick,4,0.089,59
+R3,3-opt optimum,64,ruin_recreate,3,0.067,59
+R3,3-opt optimum,64,double_bridge_local,3,0.067,59
+R3,3-opt optimum,64,string_removal,1,0.022,59
+R3,LK optimum,1,lk_kick,110,0.84,9
+R3,LK optimum,1,kick,14,0.107,9
+R3,LK optimum,1,double_bridge_local,4,0.031,9
+R3,LK optimum,1,double_bridge,1,0.008,9
+R3,LK optimum,1,ruin_recreate,1,0.008,9
+R3,LK optimum,1,lin_kernighan,1,0.008,9
+R3,LK optimum,8,lk_kick,73,0.723,39
+R3,LK optimum,8,kick,10,0.099,39
+R3,LK optimum,8,double_bridge,7,0.069,39
+R3,LK optimum,8,lin_kernighan,5,0.05,39
+R3,LK optimum,8,ruin_recreate,2,0.02,39
+R3,LK optimum,8,double_bridge_local,2,0.02,39
+R3,LK optimum,8,string_removal,2,0.02,39
+R3,LK optimum,64,lk_kick,46,0.529,53
+R3,LK optimum,64,double_bridge,13,0.149,53
+R3,LK optimum,64,lin_kernighan,8,0.092,53
+R3,LK optimum,64,kick,6,0.069,53
+R3,LK optimum,64,string_removal,5,0.057,53
+R3,LK optimum,64,double_bridge_local,5,0.057,53
+R3,LK optimum,64,ruin_recreate,4,0.046,53
+R3,all,1,lk_kick,400,0.787,48
+R3,all,1,kick,68,0.134,48
+R3,all,1,lin_kernighan,20,0.039,48
+R3,all,1,double_bridge,5,0.01,48
+R3,all,1,double_bridge_local,5,0.01,48
+R3,all,1,ruin_recreate,5,0.01,48
+R3,all,1,lin_kernighan_alpha,4,0.008,48
+R3,all,1,string_removal,1,0.002,48
+R3,all,8,lk_kick,191,0.57,221
+R3,all,8,kick,33,0.099,221
+R3,all,8,lin_kernighan,29,0.087,221
+R3,all,8,double_bridge,27,0.081,221
+R3,all,8,lin_kernighan_alpha,24,0.072,221
+R3,all,8,double_bridge_local,11,0.033,221
+R3,all,8,string_removal,7,0.021,221
+R3,all,8,three_opt_nl,6,0.018,221
+R3,all,8,ruin_recreate,4,0.012,221
+R3,all,8,two_opt_first,2,0.006,221
+R3,all,8,two_opt_descent,1,0.003,221
+R3,all,64,lk_kick,101,0.384,293
+R3,all,64,double_bridge,38,0.144,293
+R3,all,64,kick,25,0.095,293
+R3,all,64,lin_kernighan_alpha,21,0.08,293
+R3,all,64,lin_kernighan,17,0.065,293
+R3,all,64,double_bridge_local,15,0.057,293
+R3,all,64,string_removal,13,0.049,293
+R3,all,64,three_opt_nl,10,0.038,293
+R3,all,64,ruin_recreate,9,0.034,293
+R3,all,64,two_opt_nl,3,0.011,293
+R3,all,64,two_opt_targeted,3,0.011,293
+R3,all,64,or_opt_nl,3,0.011,293
+R3,all,64,two_opt_first,2,0.008,293
+R3,all,64,two_opt_descent,1,0.004,293
+R3,all,64,two_opt_alpha,1,0.004,293
+R3,all,64,swap,1,0.004,293

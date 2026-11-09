@@ -1,0 +1,239 @@
+group,instance,class,states,seeds,leaders
+geographic,gr202,2-opt open,72,12,two_opt_descent 28; two_opt_nl 16; two_opt_alpha 15; two_opt_first 6; two_opt_targeted 4; three_opt_nl 2; kick 1
+geographic,gr202,2-opt optimum,23,12,kick 10; three_opt_nl 7; double_bridge 3; or_opt_nl 3
+geographic,gr202,3-opt optimum,12,12,kick 10; double_bridge 1; double_bridge_local 1
+geographic,gr202,LK optimum,25,12,double_bridge 11; kick 9; ruin_recreate 1; none 1; lin_kernighan 1; string_removal 1; double_bridge_local 1
+reference,kroA100,2-opt open,76,12,two_opt_descent 35; two_opt_nl 14; two_opt_targeted 9; two_opt_alpha 6; kick 5; two_opt_first 2; double_bridge 2; three_opt_nl 2; double_bridge_local 1
+reference,kroA100,2-opt optimum,13,9,ruin_recreate 4; three_opt_nl 3; kick 3; double_bridge 3
+reference,kroA100,3-opt optimum,12,12,kick 7; lin_kernighan_alpha 3; ruin_recreate 1; double_bridge_local 1
+reference,kroA100,LK optimum,15,12,none 12; double_bridge 1; ruin_recreate 1; kick 1
+reference,pcb442,2-opt open,85,12,two_opt_descent 55; two_opt_first 12; kick 8; three_opt_nl 5; two_opt_alpha 2; two_opt_nl 2; or_opt_nl 1
+reference,pcb442,2-opt optimum,12,8,three_opt_nl 8; kick 2; or_opt_nl 1; lin_kernighan_alpha 1
+reference,pcb442,3-opt optimum,11,11,kick 4; lin_kernighan_alpha 4; ruin_recreate 2; string_removal 1
+reference,pcb442,LK optimum,32,12,kick 20; ruin_recreate 5; none 3; lin_kernighan 3; string_removal 1
+other,ali535,2-opt open,95,12,two_opt_descent 39; two_opt_alpha 16; two_opt_first 12; or_opt_nl 11; two_opt_nl 6; three_opt_nl 6; two_opt_targeted 3; ruin_recreate 1; kick 1
+other,ali535,2-opt optimum,6,5,ruin_recreate 2; or_opt_nl 2; three_opt_nl 1; string_removal 1
+other,ali535,3-opt optimum,7,7,ruin_recreate 5; double_bridge_local 1; lin_kernighan_alpha 1
+other,ali535,LK optimum,34,12,ruin_recreate 14; kick 9; double_bridge 5; lin_kernighan 3; none 2; double_bridge_local 1
+other,att532,2-opt open,87,12,two_opt_descent 55; two_opt_first 12; three_opt_nl 8; or_opt_nl 5; two_opt_nl 4; kick 3
+other,att532,2-opt optimum,9,8,three_opt_nl 8; or_opt_nl 1
+other,att532,3-opt optimum,12,12,ruin_recreate 10; kick 2
+other,att532,LK optimum,33,12,kick 14; lin_kernighan 6; double_bridge 4; ruin_recreate 4; string_removal 3; double_bridge_local 2
+other,d198,2-opt open,103,12,two_opt_alpha 65; two_opt_descent 12; two_opt_nl 11; two_opt_first 4; two_opt_targeted 4; or_opt_nl 3; kick 3; two_opt_best 1
+other,d198,LK optimum,19,12,ruin_recreate 6; none 6; kick 5; double_bridge_local 1; string_removal 1
+other,d493,2-opt open,81,12,two_opt_descent 52; two_opt_first 12; two_opt_nl 5; or_opt_nl 5; three_opt_nl 3; two_opt_targeted 3; kick 1
+other,d493,2-opt optimum,15,10,three_opt_nl 12; ruin_recreate 1; kick 1; double_bridge 1
+other,d493,3-opt optimum,12,12,ruin_recreate 6; double_bridge_local 3; string_removal 3
+other,d493,LK optimum,31,12,kick 17; string_removal 4; ruin_recreate 4; double_bridge 4; double_bridge_local 2
+other,eil101,2-opt open,72,12,two_opt_descent 47; two_opt_nl 12; two_opt_targeted 6; or_opt_nl 3; two_opt_alpha 2; three_opt_nl 1; kick 1
+other,eil101,2-opt optimum,20,12,three_opt_nl 12; or_opt_nl 4; kick 3; double_bridge 1
+other,eil101,3-opt optimum,12,12,lin_kernighan_alpha 6; kick 2; double_bridge 1; double_bridge_local 1; ruin_recreate 1; lin_kernighan 1
+other,eil101,LK optimum,19,12,none 9; kick 6; double_bridge 3; lin_kernighan 1
+other,gr96,2-opt open,69,12,two_opt_descent 41; two_opt_nl 16; kick 5; two_opt_targeted 4; two_opt_alpha 3
+other,gr96,2-opt optimum,20,12,kick 10; three_opt_nl 7; double_bridge 2; double_bridge_local 1
+other,gr96,3-opt optimum,5,5,kick 2; double_bridge_local 1; double_bridge 1; string_removal 1
+other,gr96,LK optimum,17,12,none 7; double_bridge 3; ruin_recreate 2; string_removal 2; kick 1; double_bridge_local 1; lin_kernighan 1
+other,kroA200,2-opt open,76,12,two_opt_descent 43; two_opt_first 11; two_opt_nl 10; two_opt_alpha 3; kick 3; two_opt_targeted 2; or_opt_nl 2; three_opt_nl 1; ruin_recreate 1
+other,kroA200,2-opt optimum,17,10,three_opt_nl 11; or_opt_nl 3; kick 2; double_bridge 1
+other,kroA200,3-opt optimum,11,11,kick 7; lin_kernighan_alpha 3; lin_kernighan 1
+other,kroA200,LK optimum,26,12,double_bridge 9; kick 7; double_bridge_local 4; ruin_recreate 3; none 2; lin_kernighan 1
+other,lin105,2-opt open,76,12,two_opt_descent 34; kick 20; two_opt_nl 15; double_bridge 2; two_opt_targeted 2; two_opt_alpha 1; lin_kernighan_alpha 1; three_opt_nl 1
+other,lin105,2-opt optimum,16,12,kick 11; three_opt_nl 3; or_opt_nl 1; double_bridge 1
+other,lin105,3-opt optimum,10,10,lin_kernighan_alpha 5; kick 3; double_bridge 1; ruin_recreate 1
+other,lin105,LK optimum,18,12,none 12; kick 5; double_bridge 1
+other,netgen-100-0,2-opt open,85,12,two_opt_alpha 47; two_opt_nl 12; two_opt_descent 10; ruin_recreate 6; kick 4; double_bridge_local 2; double_bridge 2; or_opt_nl 1; string_removal 1
+other,netgen-100-0,2-opt optimum,11,7,ruin_recreate 4; three_opt_nl 3; or_opt_nl 1; double_bridge_local 1; string_removal 1; kick 1
+other,netgen-100-0,3-opt optimum,7,7,double_bridge_local 4; kick 2; ruin_recreate 1
+other,netgen-100-0,LK optimum,20,12,double_bridge 8; none 8; kick 4
+other,netgen-100-1,2-opt open,87,12,two_opt_alpha 47; two_opt_nl 13; two_opt_descent 12; or_opt_nl 9; two_opt_best 5; ruin_recreate 1
+other,netgen-100-1,2-opt optimum,10,8,ruin_recreate 4; three_opt_nl 4; or_opt_nl 2
+other,netgen-100-1,3-opt optimum,8,8,ruin_recreate 4; string_removal 3; double_bridge_local 1
+other,netgen-100-1,LK optimum,19,12,none 12; kick 3; ruin_recreate 3; double_bridge_local 1
+other,netgen-100-2,2-opt open,80,12,two_opt_alpha 53; two_opt_nl 14; two_opt_descent 6; two_opt_first 2; or_opt_nl 2; string_removal 1; double_bridge 1; kick 1
+other,netgen-100-2,2-opt optimum,15,12,double_bridge_local 8; three_opt_nl 3; string_removal 1; ruin_recreate 1; kick 1; double_bridge 1
+other,netgen-100-2,3-opt optimum,12,12,double_bridge_local 6; kick 4; ruin_recreate 1; double_bridge 1
+other,netgen-100-2,LK optimum,21,12,ruin_recreate 14; double_bridge_local 4; none 3
+other,netgen-100-3,2-opt open,76,12,two_opt_alpha 36; two_opt_nl 20; two_opt_descent 14; two_opt_first 3; or_opt_nl 2; double_bridge_local 1
+other,netgen-100-3,2-opt optimum,15,11,or_opt_nl 5; string_removal 3; ruin_recreate 3; double_bridge_local 2; kick 2
+other,netgen-100-3,3-opt optimum,6,6,double_bridge 4; kick 1; string_removal 1
+other,netgen-100-3,LK optimum,14,12,none 12; string_removal 1; ruin_recreate 1
+other,netgen-200-0,2-opt open,91,12,two_opt_alpha 36; two_opt_descent 25; two_opt_first 9; or_opt_nl 8; kick 5; two_opt_targeted 4; two_opt_nl 3; double_bridge 1
+other,netgen-200-0,2-opt optimum,10,7,three_opt_nl 3; double_bridge_local 3; or_opt_nl 2; kick 1; string_removal 1
+other,netgen-200-0,3-opt optimum,7,7,ruin_recreate 2; kick 2; double_bridge_local 2; string_removal 1
+other,netgen-200-0,LK optimum,16,12,string_removal 5; kick 4; ruin_recreate 3; double_bridge 2; none 2
+other,netgen-200-1,2-opt open,90,12,two_opt_descent 32; two_opt_alpha 18; two_opt_first 9; kick 9; two_opt_nl 6; two_opt_targeted 6; or_opt_nl 5; three_opt_nl 2; string_removal 2; double_bridge_local 1
+other,netgen-200-1,2-opt optimum,7,5,three_opt_nl 5; ruin_recreate 2
+other,netgen-200-1,3-opt optimum,7,7,ruin_recreate 3; kick 2; double_bridge_local 1; string_removal 1
+other,netgen-200-1,LK optimum,18,12,kick 9; none 5; ruin_recreate 2; double_bridge 1; double_bridge_local 1
+other,netgen-200-2,2-opt open,99,12,two_opt_descent 38; two_opt_alpha 36; two_opt_first 11; kick 6; or_opt_nl 3; two_opt_nl 2; two_opt_targeted 2; ruin_recreate 1
+other,netgen-200-2,2-opt optimum,5,3,or_opt_nl 2; double_bridge_local 2; ruin_recreate 1
+other,netgen-200-2,3-opt optimum,4,4,kick 2; double_bridge_local 1; ruin_recreate 1
+other,netgen-200-2,LK optimum,26,12,kick 14; string_removal 5; ruin_recreate 3; double_bridge 3; none 1
+other,netgen-200-3,2-opt open,83,12,two_opt_descent 28; two_opt_alpha 24; two_opt_first 11; or_opt_nl 7; two_opt_nl 5; two_opt_targeted 5; kick 3
+other,netgen-200-3,2-opt optimum,13,8,three_opt_nl 4; or_opt_nl 3; kick 2; double_bridge_local 2; string_removal 1; ruin_recreate 1
+other,netgen-200-3,3-opt optimum,11,11,kick 5; string_removal 2; double_bridge_local 2; ruin_recreate 2
+other,netgen-200-3,LK optimum,27,12,kick 13; none 6; ruin_recreate 5; double_bridge_local 1; lin_kernighan 1; double_bridge 1
+other,netgen-500-0,2-opt open,91,12,two_opt_descent 55; two_opt_first 12; three_opt_nl 6; two_opt_alpha 6; kick 4; or_opt_nl 3; ruin_recreate 2; double_bridge 1; two_opt_nl 1; two_opt_targeted 1
+other,netgen-500-0,2-opt optimum,8,5,three_opt_nl 3; kick 2; ruin_recreate 2; or_opt_nl 1
+other,netgen-500-0,3-opt optimum,9,9,ruin_recreate 6; kick 2; string_removal 1
+other,netgen-500-0,LK optimum,35,12,kick 14; ruin_recreate 11; double_bridge 7; lin_kernighan 3
+other,netgen-500-1,2-opt open,101,12,two_opt_descent 53; two_opt_alpha 17; two_opt_first 12; or_opt_nl 8; kick 4; two_opt_targeted 2; three_opt_nl 2; ruin_recreate 2; two_opt_nl 1
+other,netgen-500-1,2-opt optimum,2,2,three_opt_nl 1; ruin_recreate 1
+other,netgen-500-1,3-opt optimum,5,5,ruin_recreate 4; kick 1
+other,netgen-500-1,LK optimum,36,12,ruin_recreate 14; kick 12; string_removal 5; double_bridge 3; double_bridge_local 1; lin_kernighan 1
+other,netgen-500-2,2-opt open,78,12,two_opt_descent 51; two_opt_first 12; two_opt_nl 7; or_opt_nl 5; three_opt_nl 2; kick 1
+other,netgen-500-2,2-opt optimum,18,10,three_opt_nl 8; or_opt_nl 6; ruin_recreate 2; string_removal 2
+other,netgen-500-2,3-opt optimum,12,12,ruin_recreate 5; string_removal 4; kick 2; double_bridge_local 1
+other,netgen-500-2,LK optimum,32,12,kick 17; double_bridge 5; double_bridge_local 4; ruin_recreate 3; lin_kernighan 2; string_removal 1
+other,netgen-500-3,2-opt open,98,12,two_opt_descent 46; two_opt_first 13; two_opt_alpha 13; three_opt_nl 9; two_opt_nl 6; or_opt_nl 6; kick 2; two_opt_best 2; ruin_recreate 1
+other,netgen-500-3,2-opt optimum,2,2,three_opt_nl 1; double_bridge_local 1
+other,netgen-500-3,3-opt optimum,8,8,ruin_recreate 3; kick 2; double_bridge_local 2; string_removal 1
+other,netgen-500-3,LK optimum,34,12,ruin_recreate 20; kick 4; double_bridge_local 4; lin_kernighan 3; string_removal 2; double_bridge 1
+other,portgen-100-0,2-opt open,69,12,two_opt_nl 25; two_opt_descent 21; two_opt_alpha 9; two_opt_targeted 5; kick 5; or_opt_nl 2; three_opt_nl 2
+other,portgen-100-0,2-opt optimum,22,11,kick 5; three_opt_nl 4; lin_kernighan_alpha 4; or_opt_nl 3; double_bridge 2; ruin_recreate 2; string_removal 1; double_bridge_local 1
+other,portgen-100-0,3-opt optimum,11,11,lin_kernighan_alpha 4; kick 3; double_bridge 2; string_removal 1; ruin_recreate 1
+other,portgen-100-0,LK optimum,17,12,none 11; kick 6
+other,portgen-100-1,2-opt open,70,12,two_opt_descent 26; two_opt_nl 20; two_opt_alpha 10; two_opt_targeted 7; three_opt_nl 4; kick 2; ruin_recreate 1
+other,portgen-100-1,2-opt optimum,20,11,three_opt_nl 14; ruin_recreate 2; kick 2; double_bridge 1; lin_kernighan_alpha 1
+other,portgen-100-1,3-opt optimum,10,10,kick 5; double_bridge 2; lin_kernighan_alpha 2; double_bridge_local 1
+other,portgen-100-1,LK optimum,18,12,none 9; double_bridge 5; kick 3; ruin_recreate 1
+other,portgen-100-2,2-opt open,70,12,two_opt_descent 29; two_opt_nl 20; two_opt_alpha 11; two_opt_targeted 9; kick 1
+other,portgen-100-2,2-opt optimum,23,12,three_opt_nl 8; double_bridge 6; kick 6; or_opt_nl 3
+other,portgen-100-2,3-opt optimum,12,12,lin_kernighan_alpha 4; double_bridge 3; kick 3; double_bridge_local 1; ruin_recreate 1
+other,portgen-100-2,LK optimum,14,12,none 12; double_bridge 2
+other,portgen-100-3,2-opt open,72,12,two_opt_descent 28; two_opt_nl 19; two_opt_alpha 10; two_opt_targeted 4; or_opt_nl 4; three_opt_nl 3; kick 2; two_opt_first 1; double_bridge 1
+other,portgen-100-3,2-opt optimum,20,12,three_opt_nl 6; or_opt_nl 5; kick 4; lin_kernighan 1; lin_kernighan_alpha 1; ruin_recreate 1; double_bridge 1; string_removal 1
+other,portgen-100-3,3-opt optimum,12,12,double_bridge 3; lin_kernighan_alpha 3; kick 3; lin_kernighan 1; ruin_recreate 1; double_bridge_local 1
+other,portgen-100-3,LK optimum,17,12,none 6; kick 4; double_bridge 3; ruin_recreate 2; double_bridge_local 2
+other,portgen-200-0,2-opt open,75,12,two_opt_descent 50; two_opt_first 8; two_opt_nl 8; two_opt_targeted 3; three_opt_nl 3; double_bridge 1; or_opt_nl 1; two_opt_alpha 1
+other,portgen-200-0,2-opt optimum,21,12,three_opt_nl 17; double_bridge 1; or_opt_nl 1; ruin_recreate 1; double_bridge_local 1
+other,portgen-200-0,3-opt optimum,12,12,ruin_recreate 5; kick 4; lin_kernighan_alpha 2; double_bridge_local 1
+other,portgen-200-0,LK optimum,26,12,kick 10; lin_kernighan 7; double_bridge 4; none 4; segment_exchange 1
+other,portgen-200-1,2-opt open,78,12,two_opt_descent 43; two_opt_nl 13; kick 9; two_opt_first 5; double_bridge_local 3; two_opt_alpha 2; two_opt_targeted 2; three_opt_nl 1
+other,portgen-200-1,2-opt optimum,18,11,three_opt_nl 9; kick 4; or_opt_nl 3; double_bridge_local 2
+other,portgen-200-1,3-opt optimum,12,12,double_bridge_local 5; kick 4; lin_kernighan_alpha 3
+other,portgen-200-1,LK optimum,28,12,kick 13; double_bridge 6; none 4; lin_kernighan 3; ruin_recreate 2
+other,portgen-200-2,2-opt open,72,12,two_opt_descent 27; two_opt_nl 27; two_opt_targeted 7; two_opt_first 6; two_opt_alpha 2; three_opt_nl 2; kick 1
+other,portgen-200-2,2-opt optimum,24,12,three_opt_nl 10; or_opt_nl 5; ruin_recreate 5; double_bridge_local 2; string_removal 1; lin_kernighan_alpha 1
+other,portgen-200-2,3-opt optimum,12,12,ruin_recreate 7; kick 1; lin_kernighan 1; double_bridge_local 1; lin_kernighan_alpha 1; double_bridge 1
+other,portgen-200-2,LK optimum,23,12,kick 10; double_bridge 6; none 5; ruin_recreate 1; lin_kernighan 1
+other,portgen-200-3,2-opt open,74,12,two_opt_descent 39; two_opt_nl 9; two_opt_first 7; two_opt_targeted 6; kick 5; two_opt_alpha 4; double_bridge_local 3; double_bridge 1
+other,portgen-200-3,2-opt optimum,20,11,three_opt_nl 11; kick 5; or_opt_nl 3; lin_kernighan_alpha 1
+other,portgen-200-3,3-opt optimum,12,12,kick 8; lin_kernighan_alpha 2; double_bridge 1; string_removal 1
+other,portgen-200-3,LK optimum,26,12,double_bridge 7; kick 7; none 4; lin_kernighan 3; double_bridge_local 3; string_removal 1; ruin_recreate 1
+other,portgen-500-0,2-opt open,81,12,two_opt_descent 59; two_opt_first 12; kick 5; three_opt_nl 4; two_opt_alpha 1
+other,portgen-500-0,2-opt optimum,15,11,three_opt_nl 13; ruin_recreate 1; kick 1
+other,portgen-500-0,3-opt optimum,12,12,ruin_recreate 5; lin_kernighan_alpha 4; kick 2; string_removal 1
+other,portgen-500-0,LK optimum,31,12,kick 12; ruin_recreate 6; double_bridge 5; double_bridge_local 5; lin_kernighan 3
+other,portgen-500-1,2-opt open,78,12,two_opt_descent 52; two_opt_first 12; three_opt_nl 7; two_opt_nl 4; kick 1; two_opt_targeted 1; or_opt_nl 1
+other,portgen-500-1,2-opt optimum,18,11,three_opt_nl 17; or_opt_nl 1
+other,portgen-500-1,3-opt optimum,12,12,kick 7; lin_kernighan 2; string_removal 1; lin_kernighan_alpha 1; ruin_recreate 1
+other,portgen-500-1,LK optimum,31,12,kick 21; string_removal 4; double_bridge 2; lin_kernighan 2; ruin_recreate 1; double_bridge_local 1
+other,portgen-500-2,2-opt open,85,12,two_opt_descent 59; two_opt_first 12; three_opt_nl 7; or_opt_nl 3; ruin_recreate 2; two_opt_nl 1; kick 1
+other,portgen-500-2,2-opt optimum,11,7,three_opt_nl 8; or_opt_nl 1; string_removal 1; ruin_recreate 1
+other,portgen-500-2,3-opt optimum,12,12,kick 7; ruin_recreate 4; lin_kernighan_alpha 1
+other,portgen-500-2,LK optimum,36,12,ruin_recreate 17; kick 12; string_removal 3; lin_kernighan 2; double_bridge_local 1; double_bridge 1
+other,portgen-500-3,2-opt open,85,12,two_opt_descent 57; two_opt_first 12; three_opt_nl 8; two_opt_targeted 3; kick 2; two_opt_nl 1; two_opt_alpha 1; double_bridge_local 1
+other,portgen-500-3,2-opt optimum,11,9,three_opt_nl 10; kick 1
+other,portgen-500-3,3-opt optimum,12,12,ruin_recreate 6; kick 3; lin_kernighan_alpha 2; string_removal 1
+other,portgen-500-3,LK optimum,34,12,kick 19; double_bridge 5; string_removal 5; ruin_recreate 4; double_bridge_local 1
+other,portmgen-100-0,2-opt open,78,12,two_opt_targeted 25; two_opt_nl 16; two_opt_descent 15; lin_kernighan_alpha 13; two_opt_alpha 3; lin_kernighan 2; two_opt_first 2; three_opt_nl 2
+other,portmgen-100-0,2-opt optimum,15,12,lin_kernighan_alpha 12; lin_kernighan 3
+other,portmgen-100-0,3-opt optimum,12,12,lin_kernighan_alpha 11; lin_kernighan 1
+other,portmgen-100-0,LK optimum,13,12,none 9; double_bridge_local 2; kick 1; lin_kernighan 1
+other,portmgen-100-1,2-opt open,72,12,two_opt_targeted 31; two_opt_nl 13; lin_kernighan_alpha 12; two_opt_descent 9; two_opt_alpha 2; two_opt_first 2; three_opt_nl 1; lin_kernighan 1; kick 1
+other,portmgen-100-1,2-opt optimum,19,12,lin_kernighan_alpha 16; lin_kernighan 2; three_opt_nl 1
+other,portmgen-100-1,3-opt optimum,12,12,lin_kernighan_alpha 9; lin_kernighan 3
+other,portmgen-100-1,LK optimum,13,12,none 12; double_bridge 1
+other,portmgen-100-2,2-opt open,67,12,two_opt_targeted 23; two_opt_descent 13; two_opt_nl 12; lin_kernighan_alpha 11; two_opt_first 4; three_opt_nl 2; two_opt_alpha 1; lin_kernighan 1
+other,portmgen-100-2,2-opt optimum,17,12,lin_kernighan_alpha 13; three_opt_nl 3; lin_kernighan 1
+other,portmgen-100-2,3-opt optimum,12,12,lin_kernighan_alpha 12
+other,portmgen-100-2,LK optimum,12,12,none 9; double_bridge_local 1; kick 1; double_bridge 1
+other,portmgen-100-3,2-opt open,70,12,two_opt_targeted 25; two_opt_descent 17; two_opt_nl 12; lin_kernighan_alpha 8; two_opt_first 3; two_opt_alpha 3; or_opt_nl 1; lin_kernighan 1
+other,portmgen-100-3,2-opt optimum,17,12,lin_kernighan_alpha 16; lin_kernighan 1
+other,portmgen-100-3,3-opt optimum,12,12,lin_kernighan_alpha 11; lin_kernighan 1
+other,portmgen-100-3,LK optimum,14,12,none 9; double_bridge 3; double_bridge_local 2
+other,portmgen-200-0,2-opt open,84,12,two_opt_targeted 25; two_opt_descent 22; lin_kernighan_alpha 20; two_opt_first 12; two_opt_nl 3; two_opt_alpha 1; lin_kernighan 1
+other,portmgen-200-0,2-opt optimum,11,11,lin_kernighan_alpha 11
+other,portmgen-200-0,3-opt optimum,12,12,lin_kernighan_alpha 12
+other,portmgen-200-0,LK optimum,12,12,none 5; double_bridge_local 4; lin_kernighan 2; kick 1
+other,portmgen-200-1,2-opt open,80,12,two_opt_descent 24; lin_kernighan_alpha 21; two_opt_targeted 19; two_opt_first 12; two_opt_nl 2; two_opt_alpha 1; or_opt_nl 1
+other,portmgen-200-1,2-opt optimum,12,10,lin_kernighan_alpha 12
+other,portmgen-200-1,3-opt optimum,12,12,lin_kernighan_alpha 10; lin_kernighan 2
+other,portmgen-200-1,LK optimum,12,12,none 9; lin_kernighan 2; kick 1
+other,portmgen-200-2,2-opt open,84,12,two_opt_targeted 39; lin_kernighan_alpha 17; two_opt_descent 14; two_opt_first 12; two_opt_alpha 2
+other,portmgen-200-2,2-opt optimum,12,12,lin_kernighan_alpha 12
+other,portmgen-200-2,3-opt optimum,12,12,lin_kernighan_alpha 11; lin_kernighan 1
+other,portmgen-200-2,LK optimum,13,12,none 7; double_bridge 2; kick 2; lin_kernighan 1; double_bridge_local 1
+other,portmgen-200-3,2-opt open,79,12,two_opt_targeted 26; two_opt_descent 22; lin_kernighan_alpha 15; two_opt_first 12; two_opt_nl 2; two_opt_alpha 1; lin_kernighan 1
+other,portmgen-200-3,2-opt optimum,14,12,lin_kernighan_alpha 12; lin_kernighan 2
+other,portmgen-200-3,3-opt optimum,12,12,lin_kernighan_alpha 12
+other,portmgen-200-3,LK optimum,12,12,none 7; lin_kernighan 2; double_bridge 2; double_bridge_local 1
+other,portmgen-500-0,2-opt open,87,12,two_opt_targeted 31; two_opt_descent 22; lin_kernighan_alpha 15; two_opt_first 13; lin_kernighan 5; two_opt_nl 1
+other,portmgen-500-0,2-opt optimum,9,9,lin_kernighan_alpha 7; lin_kernighan 2
+other,portmgen-500-0,3-opt optimum,12,12,lin_kernighan 7; lin_kernighan_alpha 5
+other,portmgen-500-0,LK optimum,12,12,none 7; kick 3; lin_kernighan 2
+other,portmgen-500-1,2-opt open,87,12,two_opt_targeted 30; two_opt_descent 25; lin_kernighan_alpha 16; two_opt_first 12; two_opt_nl 2; lin_kernighan 2
+other,portmgen-500-1,2-opt optimum,9,9,lin_kernighan_alpha 9
+other,portmgen-500-1,3-opt optimum,12,12,lin_kernighan 8; lin_kernighan_alpha 4
+other,portmgen-500-1,LK optimum,13,12,none 8; lin_kernighan 3; double_bridge 2
+other,portmgen-500-2,2-opt open,88,12,two_opt_targeted 28; two_opt_descent 25; two_opt_first 12; lin_kernighan_alpha 11; lin_kernighan 10; two_opt_nl 1; three_opt_nl 1
+other,portmgen-500-2,2-opt optimum,7,7,lin_kernighan_alpha 6; lin_kernighan 1
+other,portmgen-500-2,3-opt optimum,12,12,lin_kernighan 10; lin_kernighan_alpha 2
+other,portmgen-500-2,LK optimum,12,12,lin_kernighan 6; none 5; kick 1
+other,portmgen-500-3,2-opt open,88,12,two_opt_targeted 31; two_opt_descent 23; lin_kernighan_alpha 14; two_opt_first 12; lin_kernighan 7; two_opt_nl 1
+other,portmgen-500-3,2-opt optimum,8,8,lin_kernighan_alpha 7; lin_kernighan 1
+other,portmgen-500-3,3-opt optimum,12,12,lin_kernighan 9; lin_kernighan_alpha 3
+other,portmgen-500-3,LK optimum,12,12,none 7; lin_kernighan 3; double_bridge_local 1; double_bridge 1
+other,tsp225,2-opt open,79,12,two_opt_descent 44; two_opt_first 8; two_opt_targeted 8; two_opt_nl 6; kick 6; or_opt_nl 3; three_opt_nl 2; double_bridge 2
+other,tsp225,2-opt optimum,17,10,three_opt_nl 14; or_opt_nl 2; kick 1
+other,tsp225,3-opt optimum,12,12,kick 5; double_bridge_local 3; ruin_recreate 2; double_bridge 1; lin_kernighan_alpha 1
+other,tsp225,LK optimum,33,12,kick 14; double_bridge 7; ruin_recreate 5; none 5; double_bridge_local 1; string_removal 1
+other,tspgen-100-0,2-opt open,81,12,two_opt_descent 37; two_opt_alpha 15; two_opt_nl 12; kick 7; or_opt_nl 3; two_opt_targeted 3; double_bridge 2; three_opt_nl 1; two_opt_first 1
+other,tspgen-100-0,2-opt optimum,14,11,kick 9; double_bridge 2; double_bridge_local 2; three_opt_nl 1
+other,tspgen-100-0,3-opt optimum,9,9,kick 4; double_bridge 3; ruin_recreate 1; lin_kernighan_alpha 1
+other,tspgen-100-0,LK optimum,14,12,none 10; double_bridge 2; kick 2
+other,tspgen-100-1,2-opt open,73,12,two_opt_descent 29; two_opt_alpha 18; two_opt_nl 15; two_opt_targeted 6; kick 4; double_bridge 1
+other,tspgen-100-1,2-opt optimum,20,11,kick 8; or_opt_nl 4; three_opt_nl 3; double_bridge 2; double_bridge_local 1; ruin_recreate 1; string_removal 1
+other,tspgen-100-1,3-opt optimum,12,12,ruin_recreate 4; double_bridge_local 3; kick 3; double_bridge 2
+other,tspgen-100-1,LK optimum,15,12,none 10; kick 5
+other,tspgen-100-2,2-opt open,73,12,two_opt_descent 28; two_opt_alpha 20; two_opt_nl 16; two_opt_targeted 5; three_opt_nl 2; kick 2
+other,tspgen-100-2,2-opt optimum,20,11,kick 10; three_opt_nl 4; lin_kernighan_alpha 2; or_opt_nl 2; ruin_recreate 1; double_bridge 1
+other,tspgen-100-2,3-opt optimum,12,12,double_bridge 4; kick 4; lin_kernighan_alpha 2; double_bridge_local 1; ruin_recreate 1
+other,tspgen-100-2,LK optimum,17,12,none 11; double_bridge 3; kick 3
+other,tspgen-100-3,2-opt open,75,12,two_opt_descent 25; two_opt_alpha 22; two_opt_nl 17; or_opt_nl 4; kick 3; two_opt_targeted 2; double_bridge 2
+other,tspgen-100-3,2-opt optimum,14,10,ruin_recreate 3; kick 3; or_opt_nl 2; three_opt_nl 2; lin_kernighan_alpha 2; string_removal 1; double_bridge_local 1
+other,tspgen-100-3,3-opt optimum,11,11,kick 4; lin_kernighan_alpha 3; ruin_recreate 2; double_bridge 2
+other,tspgen-100-3,LK optimum,13,12,none 11; kick 1; double_bridge_local 1
+other,tspgen-200-0,2-opt open,99,12,two_opt_alpha 43; two_opt_descent 25; kick 11; two_opt_nl 8; two_opt_first 6; or_opt_nl 2; three_opt_nl 1; double_bridge 1; two_opt_best 1; two_opt_targeted 1
+other,tspgen-200-0,2-opt optimum,2,1,three_opt_nl 2
+other,tspgen-200-0,3-opt optimum,5,5,kick 3; string_removal 2
+other,tspgen-200-0,LK optimum,22,12,kick 9; none 8; double_bridge 2; lin_kernighan 1; string_removal 1; ruin_recreate 1
+other,tspgen-200-1,2-opt open,86,12,two_opt_descent 40; two_opt_alpha 15; two_opt_first 9; two_opt_nl 8; kick 7; or_opt_nl 2; two_opt_targeted 2; double_bridge 1; three_opt_nl 1; double_bridge_local 1
+other,tspgen-200-1,2-opt optimum,11,8,ruin_recreate 3; three_opt_nl 2; lin_kernighan_alpha 2; or_opt_nl 2; double_bridge 1; kick 1
+other,tspgen-200-1,3-opt optimum,11,11,ruin_recreate 5; lin_kernighan_alpha 3; kick 3
+other,tspgen-200-1,LK optimum,26,12,kick 9; none 5; string_removal 4; double_bridge 4; ruin_recreate 2; double_bridge_local 1; lin_kernighan 1
+other,tspgen-200-2,2-opt open,78,12,two_opt_descent 39; two_opt_nl 21; or_opt_nl 6; kick 3; two_opt_first 3; two_opt_targeted 3; two_opt_alpha 2; double_bridge 1
+other,tspgen-200-2,2-opt optimum,17,11,kick 8; three_opt_nl 6; ruin_recreate 1; double_bridge_local 1; or_opt_nl 1
+other,tspgen-200-2,3-opt optimum,11,11,kick 8; double_bridge 3
+other,tspgen-200-2,LK optimum,26,12,kick 14; double_bridge 5; string_removal 2; lin_kernighan 2; ruin_recreate 1; none 1; double_bridge_local 1
+other,tspgen-200-3,2-opt open,78,12,two_opt_descent 45; two_opt_nl 11; or_opt_nl 8; kick 5; two_opt_first 4; two_opt_targeted 3; two_opt_alpha 2
+other,tspgen-200-3,2-opt optimum,16,10,kick 6; ruin_recreate 3; or_opt_nl 3; three_opt_nl 2; double_bridge 2
+other,tspgen-200-3,3-opt optimum,12,12,kick 7; double_bridge 3; ruin_recreate 1; lin_kernighan_alpha 1
+other,tspgen-200-3,LK optimum,27,12,double_bridge 7; none 7; kick 6; lin_kernighan 4; double_bridge_local 3
+other,tspgen-500-0,2-opt open,94,12,two_opt_descent 51; two_opt_first 12; two_opt_alpha 8; two_opt_targeted 6; three_opt_nl 6; or_opt_nl 4; two_opt_best 2; kick 2; ruin_recreate 2; two_opt_nl 1
+other,tspgen-500-0,2-opt optimum,7,4,or_opt_nl 3; three_opt_nl 3; ruin_recreate 1
+other,tspgen-500-0,3-opt optimum,8,8,ruin_recreate 4; kick 4
+other,tspgen-500-0,LK optimum,32,12,kick 13; double_bridge 8; ruin_recreate 7; string_removal 2; lin_kernighan 1; none 1
+other,tspgen-500-1,2-opt open,97,12,two_opt_descent 54; two_opt_first 12; three_opt_nl 8; two_opt_nl 5; two_opt_targeted 4; ruin_recreate 4; or_opt_nl 4; kick 2; string_removal 2; two_opt_alpha 2
+other,tspgen-500-1,2-opt optimum,3,3,three_opt_nl 2; ruin_recreate 1
+other,tspgen-500-1,3-opt optimum,8,8,ruin_recreate 6; kick 2
+other,tspgen-500-1,LK optimum,35,12,kick 20; ruin_recreate 8; double_bridge 3; double_bridge_local 2; lin_kernighan 1; string_removal 1
+other,tspgen-500-2,2-opt open,96,12,two_opt_descent 53; two_opt_first 12; or_opt_nl 9; three_opt_nl 9; kick 4; two_opt_best 3; two_opt_nl 3; two_opt_targeted 2; ruin_recreate 1
+other,tspgen-500-2,2-opt optimum,4,3,ruin_recreate 3; or_opt_nl 1
+other,tspgen-500-2,3-opt optimum,8,8,kick 5; ruin_recreate 2; double_bridge_local 1
+other,tspgen-500-2,LK optimum,34,12,string_removal 16; kick 13; ruin_recreate 2; double_bridge_local 1; lin_kernighan 1; double_bridge 1
+other,tspgen-500-3,2-opt open,86,12,two_opt_descent 53; two_opt_first 12; or_opt_nl 7; two_opt_nl 5; kick 3; three_opt_nl 2; two_opt_targeted 1; double_bridge_local 1; two_opt_best 1; two_opt_alpha 1
+other,tspgen-500-3,2-opt optimum,11,9,three_opt_nl 8; or_opt_nl 2; kick 1
+other,tspgen-500-3,3-opt optimum,11,11,ruin_recreate 8; kick 3
+other,tspgen-500-3,LK optimum,34,12,ruin_recreate 17; kick 9; string_removal 3; double_bridge_local 2; lin_kernighan 1; double_bridge 1; none 1

@@ -4,7 +4,10 @@
 # each core's governor, energy preference and frequency floor from the
 # state lock-clock.sh saved.  Without a saved state (for example after a
 # reboot, which clears /run) it still turns boost on and sets each floor
-# to the driver's lowest efficient frequency.  Asks for sudo itself.
+# to the driver's lowest efficient frequency.  Also restores the amdgpu
+# power level and SMT saved by lock-clock.sh (default: `auto` and SMT on);
+# SMT first, so the cores it brings back get their settings below.  Asks
+# for sudo itself.
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
@@ -13,6 +16,24 @@ fi
 
 CPUS=/sys/devices/system/cpu
 STATE=/run/teaspoon-clock.state
+SOC_STATE=/run/teaspoon-soc.state
+
+if [[ -e $SOC_STATE ]]; then
+    # SMT first (its line is restored before the power levels either way).
+    grep " " "$SOC_STATE" | sort -r | while read -r file value; do
+        echo "$value" >"$file"
+    done
+    rm -- "$SOC_STATE"
+else
+    if [[ -w $CPUS/smt/control ]]; then
+        echo on >"$CPUS/smt/control"
+    fi
+    for level in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
+        if [[ -w $level ]]; then
+            echo auto >"$level"
+        fi
+    done
+fi
 
 echo 1 >"$CPUS/cpufreq/boost"
 
